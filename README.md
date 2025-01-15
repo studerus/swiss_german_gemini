@@ -2,6 +2,8 @@
 
 Eine React-basierte Chat-Anwendung, die Google Gemini für die Antwortgenerierung nutzt und die Antworten in verschiedenen Schweizerdeutschen Dialekten ausgeben kann.
 
+![App Preview](docs/app-preview.jpg)
+
 ## Funktionen
 
 - Schweizerdeutsche Spracheingabe und -ausgabe
