@@ -23,8 +23,8 @@ Eine React-basierte Chat-Anwendung, die Google Gemini für die Antwortgenerierun
 
 - **Frontend**: React mit TypeScript und Material-UI
 - **Sprachgenerierung**: Google Gemini API
-- **Speech-to-Text**: [STT4SG](https://stt4sg.fhnw.ch/) - Schweizerdeutsche Spracherkennung
-- **Text-to-Speech**: Microsoft Azure Speech Services
+- **Speech-to-Text**: Microsoft Azure Speech Services
+- **Text-to-Speech**: [STT4SG](https://stt4sg.fhnw.ch/) - Schweizerdeutsche Sprachgenerierung
 - **Build-Tool**: Vite
 
 ## Voraussetzungen
@@ -68,12 +68,8 @@ npm run dev
 ## API-Dienste
 
 - **Google Gemini**: Verwendet für die Generierung der Chatantworten
-- **STT4SG**: Spezialisierte Schweizerdeutsche Spracherkennung der FHNW
-- **Microsoft Azure Speech Services**: Verwendet für die Text-to-Speech Funktionalität
-
-## Lizenz
-
-MIT
+- **STT4SG**: Spezialisierte Schweizerdeutsche Spracherkennung und Sprachgenerierung der FHNW
+- **Microsoft Azure Speech Services**: Verwendet für die Speech-to-Text Funktionalität
 
 ## API-Schlüssel einrichten
 
@@ -96,3 +92,7 @@ Um die Anwendung vollständig nutzen zu können, benötigen Sie folgende API-Sch
 - Teilen Sie niemals Ihre API-Schlüssel
 - Die `.env` Datei ist bereits in `.gitignore` aufgeführt und wird nicht mit Git synchronisiert
 - Überprüfen Sie vor jedem Commit, dass keine sensiblen Daten im Code enthalten sind
+
+## Lizenz
+
+MIT
