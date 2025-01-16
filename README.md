@@ -1,98 +1,98 @@
 # Swiss German Gemini Chat
 
-Eine React-basierte Chat-Anwendung, die Google Gemini für die Antwortgenerierung nutzt und die Antworten in verschiedenen Schweizerdeutschen Dialekten ausgeben kann.
+A React-based chat application that uses Google Gemini for response generation and supports various Swiss German dialects.
 
-![App Preview](docs/app-preview.jpg)
+[![Demo Video](https://img.youtube.com/vi/C0IQrF4O-6Y/0.jpg)](https://www.youtube.com/watch?v=C0IQrF4O-6Y)
 
-## Funktionen
+## Features
 
-- Schweizerdeutsche Spracheingabe und -ausgabe
-- Unterstützung für verschiedene Schweizer Dialekte:
-  - Aargauerdeutsch
-  - Berndeutsch
-  - Baseldeutsch
-  - Graubündnerdeutsch
-  - Luzernerdeutsch
-  - St. Gallerdeutsch
-  - Walliserdeutsch
-  - Zürichdeutsch
-- Echtzeit-Chatfunktionalität mit Google Gemini API
-- Moderne und responsive Benutzeroberfläche mit Material-UI
+- Swiss German speech input and output
+- Support for various Swiss German dialects:
+  - Aargau German
+  - Bernese German
+  - Basel German
+  - Graubünden German
+  - Lucerne German
+  - St. Gallen German
+  - Valais German
+  - Zurich German
+- Real-time chat functionality with Google Gemini API
+- Modern and responsive user interface with Material-UI
 
-## Technologie-Stack
+## Technology Stack
 
-- **Frontend**: React mit TypeScript und Material-UI
-- **Sprachgenerierung**: Google Gemini API
+- **Frontend**: React with TypeScript and Material-UI
+- **Text Generation**: Google Gemini API
 - **Speech-to-Text**: Microsoft Azure Speech Services
-- **Text-to-Speech**: [STT4SG](https://stt4sg.fhnw.ch/) - Schweizerdeutsche Sprachgenerierung
-- **Build-Tool**: Vite
+- **Text-to-Speech**: [STT4SG](https://stt4sg.fhnw.ch/) - Swiss German speech synthesis
+- **Build Tool**: Vite
 
-## Voraussetzungen
+## Prerequisites
 
-- Node.js (Version 18 oder höher) - [Download hier](https://nodejs.org/)
+- Node.js (Version 18 or higher) - [Download here](https://nodejs.org/)
 
 ## Installation
 
-1. Klonen Sie das Repository:
+1. Clone the repository:
 ```bash
 git clone https://github.com/studerus/swiss_german_gemini
 cd swiss_german_gemini
 ```
 
-2. Installieren Sie die Abhängigkeiten:
+2. Install dependencies:
 ```bash
 npm install
 ```
 
-3. Erstellen Sie eine `.env` Datei im Hauptverzeichnis basierend auf `.env.example` und fügen Sie Ihre API-Schlüssel hinzu:
+3. Create a `.env` file in the root directory based on `.env.example` and add your API keys:
 ```
 VITE_GEMINI_API_KEY=your_gemini_api_key_here
 VITE_AZURE_SPEECH_KEY=your_azure_speech_key_here
 VITE_AZURE_SPEECH_REGION=your_azure_region_here
 ```
 
-4. Starten Sie die Entwicklungsumgebung:
+4. Start the development server:
 ```bash
 npm run dev
 ```
 
-## Verwendung
+## Usage
 
-1. Öffnen Sie die Anwendung in Ihrem Browser
-2. Wählen Sie Ihren gewünschten Schweizer Dialekt aus
-3. Sie können entweder:
-   - Text über das Eingabefeld eingeben
-   - Das Mikrofon für Spracheingabe nutzen
-4. Die Antwort wird sowohl als Text angezeigt als auch in Schweizerdeutsch vorgelesen
+1. Open the application in your browser
+2. Select your desired Swiss German dialect
+3. You can either:
+   - Enter text via the input field
+   - Use the microphone for speech input
+4. The response will be displayed as text and read aloud in Swiss German
 
-## API-Dienste
+## API Services
 
-- **Google Gemini**: Verwendet für die Generierung der Chatantworten
-- **STT4SG**: Spezialisierte Schweizerdeutsche Spracherkennung und Sprachgenerierung der FHNW
-- **Microsoft Azure Speech Services**: Verwendet für die Speech-to-Text Funktionalität
+- **Google Gemini**: Used for chat response generation
+- **STT4SG**: Specialized Swiss German speech synthesis by FHNW
+- **Microsoft Azure Speech Services**: Used for Speech-to-Text functionality
 
-## API-Schlüssel einrichten
+## API Key Setup
 
-Um die Anwendung vollständig nutzen zu können, benötigen Sie folgende API-Schlüssel:
+To fully use the application, you need the following API keys:
 
 1. **Google Gemini API Key**
-   - Besuchen Sie die [Google AI Studio Console](https://makersuite.google.com/app/apikey)
-   - Erstellen Sie einen neuen API-Schlüssel
-   - Kopieren Sie den Schlüssel in Ihre `.env` Datei als `VITE_GEMINI_API_KEY`
+   - Visit the [Google AI Studio Console](https://makersuite.google.com/app/apikey)
+   - Create a new API key
+   - Copy the key to your `.env` file as `VITE_GEMINI_API_KEY`
 
 2. **Microsoft Azure Speech Services**
-   - Erstellen Sie einen [Azure Account](https://azure.microsoft.com/de-de/free/)
-   - Erstellen Sie eine Speech Services Ressource
-   - Kopieren Sie den Schlüssel und die Region in Ihre `.env` Datei als:
+   - Create an [Azure Account](https://azure.microsoft.com/en-us/free/)
+   - Create a Speech Services resource
+   - Copy the key and region to your `.env` file as:
      - `VITE_AZURE_SPEECH_KEY`
      - `VITE_AZURE_SPEECH_REGION`
 
-## Sicherheitshinweise
+## Security Notes
 
-- Teilen Sie niemals Ihre API-Schlüssel
-- Die `.env` Datei ist bereits in `.gitignore` aufgeführt und wird nicht mit Git synchronisiert
-- Überprüfen Sie vor jedem Commit, dass keine sensiblen Daten im Code enthalten sind
+- Never share your API keys
+- The `.env` file is already listed in `.gitignore` and won't be synchronized with Git
+- Check before each commit that no sensitive data is included in the code
 
-## Lizenz
+## License
 
 MIT
