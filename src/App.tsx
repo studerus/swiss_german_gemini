@@ -13,9 +13,7 @@ interface ModelSettings {
 
 const AVAILABLE_MODELS = [
   { id: 'gemini-1.5-flash', name: 'Gemini 1.5 Flash' },
-  { id: 'gemini-pro', name: 'Gemini Pro' },
-  { id: 'gemini-2.0-flash-exp', name: 'Gemini 2.0 Flash (Experimental)' },
-  { id: 'gemini-2.0-flash-thinking-exp-1219', name: 'Gemini 2.0 Flash Thinking (Experimental)' },
+  { id: 'gemini-pro', name: 'Gemini Pro' }
 ] as const;
 
 const AVAILABLE_DIALECTS = [
