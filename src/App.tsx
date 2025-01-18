@@ -5,6 +5,9 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 import * as speechsdk from 'microsoft-cognitiveservices-speech-sdk';
 import { Client } from "@gradio/client";
 
+// Modulweites Flag zur Vermeidung der mehrfachen Initialisierung
+let isTTSClientInitializedOutside = false;
+
 interface ModelSettings {
   systemPrompt: string;
   maxTokens: number;
@@ -30,7 +33,7 @@ const AVAILABLE_DIALECTS = [
 type ModelId = typeof AVAILABLE_MODELS[number]['id'];
 
 interface TTSClient {
-  client: Promise<Client>;
+  client: Promise<Client> | null;
   isReady: boolean;
 }
 
@@ -82,7 +85,7 @@ Es kann sein, dass Inputs falsch transkribiert werden. Falls du also zusammenhan
     temperature: 0.7
   });
   const [ttsClient, setTTSClient] = useState<TTSClient>({
-    client: Client.connect("https://stt4sg.fhnw.ch/tts/"),
+    client: null,
     isReady: false
   });
   const [selectedDialect, setSelectedDialect] = useState<string>("Basel");
@@ -358,72 +361,148 @@ Es kann sein, dass Inputs falsch transkribiert werden. Falls du also zusammenhan
   };
 
   const initializeRecognizer = async () => {
-    // Clean up existing recognizer if it exists
-    if (recognizer.current) {
-      try {
-        await new Promise<void>((resolve, reject) => {
+    try {
+      // Stelle sicher, dass der vorherige Recognizer sauber beendet wird
+      if (recognizer.current) {
+        await new Promise<void>((resolve) => {
           recognizer.current?.stopContinuousRecognitionAsync(
             () => {
-              recognizer.current?.close();
+              try {
+                recognizer.current?.close();
+              } catch (err) {
+                console.warn('Fehler beim Schließen des Recognizers:', err);
+              }
               recognizer.current = null;
               resolve();
             },
             (err) => {
-              console.error('Error stopping recognition:', err);
-              reject(err);
+              console.warn('Fehler beim Stoppen der Erkennung:', err);
+              recognizer.current = null;
+              resolve();
             }
           );
         });
-      } catch (error) {
-        console.error('Error during recognizer cleanup:', error);
       }
-    }
 
-    if (SPEECH_KEY && SPEECH_REGION) {
-      const speechConfig = speechsdk.SpeechConfig.fromSubscription(SPEECH_KEY, SPEECH_REGION);
-      speechConfig.speechRecognitionLanguage = "de-CH";
-      
-      const audioConfig = speechsdk.AudioConfig.fromDefaultMicrophoneInput();
-      const newRecognizer = new speechsdk.SpeechRecognizer(speechConfig, audioConfig);
+      if (!SPEECH_KEY || !SPEECH_REGION) {
+        console.error('Speech Credentials nicht konfiguriert');
+        return;
+      }
 
-      // Events konfigurieren
-      newRecognizer.recognizing = (_, e) => {
-        console.log(`ERKENNE: ${e.result.text}`);
-        stopSpeech();
-      };
+      try {
+        const speechConfig = speechsdk.SpeechConfig.fromSubscription(SPEECH_KEY, SPEECH_REGION);
+        speechConfig.speechRecognitionLanguage = "de-CH";
+        
+        const audioConfig = speechsdk.AudioConfig.fromDefaultMicrophoneInput();
+        const newRecognizer = new speechsdk.SpeechRecognizer(speechConfig, audioConfig);
 
-      newRecognizer.recognized = async (_, e) => {
-        if (e.result.reason === speechsdk.ResultReason.RecognizedSpeech && e.result.text) {
-          console.log(`ERKANNT: ${e.result.text}`);
-          await handleSend(e.result.text);
-        }
-      };
+        // Events konfigurieren
+        newRecognizer.recognizing = (_, e) => {
+          if (e.result.text) {
+            console.log(`ERKENNE: ${e.result.text}`);
+            stopSpeech();
+          }
+        };
 
-      newRecognizer.canceled = (_, e) => {
-        console.log(`ABGEBROCHEN: ${e.errorDetails}`);
-        stopListening();
-      };
+        newRecognizer.recognized = async (_, e) => {
+          if (e.result.reason === speechsdk.ResultReason.RecognizedSpeech && e.result.text) {
+            console.log(`ERKANNT: ${e.result.text}`);
+            await handleSend(e.result.text);
+          }
+        };
 
-      recognizer.current = newRecognizer;
-      startListening();
+        newRecognizer.canceled = (_, e) => {
+          console.log(`ABGEBROCHEN: ${e.errorDetails}`);
+          setIsListening(false);
+        };
+
+        recognizer.current = newRecognizer;
+        startListening();
+      } catch (error) {
+        console.error('Fehler bei der Recognizer-Initialisierung:', error);
+        recognizer.current = null;
+        setIsListening(false);
+      }
+    } catch (error) {
+      console.error('Allgemeiner Fehler bei der Recognizer-Initialisierung:', error);
+      recognizer.current = null;
+      setIsListening(false);
     }
   };
 
   const stopListening = () => {
     if (recognizer.current) {
-      recognizer.current.stopContinuousRecognitionAsync(() => {
+      try {
+        recognizer.current.stopContinuousRecognitionAsync(
+          () => {
+            setIsListening(false);
+            console.log("Spracherkennung gestoppt");
+          },
+          (error) => {
+            console.error("Fehler beim Stoppen der Spracherkennung:", error);
+            setIsListening(false);
+          }
+        );
+      } catch (error) {
+        console.error("Fehler beim Stoppen der Spracherkennung:", error);
         setIsListening(false);
-        console.log("Spracherkennung gestoppt");
-      });
+      }
     }
   };
 
+  const startListening = () => {
+    if (!SPEECH_KEY || !SPEECH_REGION) {
+      console.error('Speech credentials nicht konfiguriert');
+      return;
+    }
+
+    stopSpeech(); // Stoppe Sprachausgabe wenn Nutzer spricht
+    
+    if (recognizer.current) {
+      try {
+        recognizer.current.startContinuousRecognitionAsync(
+          () => {
+            setIsListening(true);
+            console.log("Spracherkennung gestartet");
+          },
+          (error) => {
+            console.error("Fehler beim Starten der Spracherkennung:", error);
+            setIsListening(false);
+          }
+        );
+      } catch (error) {
+        console.error("Fehler beim Starten der Spracherkennung:", error);
+        setIsListening(false);
+      }
+    }
+  };
+
+  // Cleanup Effect
   useEffect(() => {
-    initializeRecognizer();
     return () => {
-      stopListening();
+      // Cleanup beim Unmounten der Komponente
+      if (recognizer.current) {
+        try {
+          recognizer.current.stopContinuousRecognitionAsync(
+            () => {
+              try {
+                recognizer.current?.close();
+              } catch (err) {
+                console.warn('Fehler beim Schließen des Recognizers:', err);
+              }
+              recognizer.current = null;
+            },
+            (err) => {
+              console.warn('Fehler beim Stoppen der Erkennung:', err);
+              recognizer.current = null;
+            }
+          );
+        } catch (error) {
+          console.error("Fehler beim Cleanup des Recognizers:", error);
+        }
+      }
     };
-  }, [SPEECH_KEY, SPEECH_REGION]);
+  }, []);
 
   const handleSettingsChange = (setting: keyof ModelSettings, value: string | number) => {
     setModelSettings(prev => ({
@@ -523,34 +602,41 @@ Es kann sein, dass Inputs falsch transkribiert werden. Falls du also zusammenhan
     }
   };
 
-  useEffect(() => {
-    const initializeTTSClient = async () => {
-      try {
-        debugLog('Initializing TTS client...');
-        const client = await Client.connect("https://stt4sg.fhnw.ch/tts/");
-        setTTSClient({
-          client: Promise.resolve(client),
-          isReady: true
-        });
-        debugLog('TTS client initialized successfully');
-      } catch (error) {
-        console.error('Failed to initialize TTS client:', error);
-        setTTSClient(prev => ({
-          ...prev,
-          isReady: false
-        }));
-      }
-    };
+  const initializeTTSClient = async () => {
+    if (isTTSClientInitializedOutside) {
+      debugLog('TTS-Client wurde bereits initialisiert.');
+      return;
+    }
+    try {
+      isTTSClientInitializedOutside = true;
+      debugLog('Initialisiere TTS-Client...');
+      const client = await Client.connect("https://stt4sg.fhnw.ch/tts/");
+      setTTSClient({
+        client: Promise.resolve(client),
+        isReady: true
+      });
+      debugLog('TTS-Client erfolgreich initialisiert.');
+    } catch (error) {
+      console.error('Fehler bei der Initialisierung des TTS-Clients:', error);
+      isTTSClientInitializedOutside = false;
+      setTTSClient(prev => ({
+        ...prev,
+        isReady: false,
+        client: null
+      }));
+    }
+  };
 
+  useEffect(() => {
     initializeTTSClient();
-  }, []); // Leeres Dependency-Array, da wir nur einmal beim Mount initialisieren wollen
+  }, []); // Dieser Effekt wird nun nur einmal initialisiert
 
   const processNextSentence = async () => {
     if (sentencesToProcess.current.length === 0) return;
 
     const nextSentence = sentencesToProcess.current[0];
     try {
-      if (!isSpeechEnabled || !ttsClient.isReady) return;
+      if (!isSpeechEnabled || !ttsClient.isReady || !ttsClient.client) return;
 
       const client = await ttsClient.client;
       debugLog('Processing sentence:', nextSentence.text, 'sequence:', nextSentence.sequence);
@@ -665,27 +751,6 @@ Es kann sein, dass Inputs falsch transkribiert werden. Falls du also zusammenhan
       }
     }
   }, []);
-
-  const startListening = () => {
-    if (!SPEECH_KEY || !SPEECH_REGION) {
-      console.error('Speech credentials not configured');
-      return;
-    }
-
-    stopSpeech(); // Stoppe Sprachausgabe wenn Nutzer spricht
-    
-    if (recognizer.current) {
-      recognizer.current.startContinuousRecognitionAsync(
-        () => {
-          setIsListening(true);
-          console.log("Spracherkennung gestartet");
-        },
-        (error) => {
-          console.error("Error starting recognition:", error);
-        }
-      );
-    }
-  };
 
   return (
     <Container maxWidth="lg" sx={{ height: '100vh', py: 2 }}>
