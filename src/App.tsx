@@ -15,7 +15,7 @@ interface ModelSettings {
 }
 
 const AVAILABLE_MODELS = [
-  { id: 'gemini-1.5-flash', name: 'Gemini 1.5 Flash' },
+  { id: 'gemini-2.0-flash', name: 'Gemini 2.0 Flash' },
   { id: 'gemini-pro', name: 'Gemini Pro' }
 ] as const;
 
@@ -69,7 +69,7 @@ function App() {
   const [messages, setMessages] = useState<Array<{ text: string; isUser: boolean }>>([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [selectedModel, setSelectedModel] = useState<ModelId>('gemini-1.5-flash');
+  const [selectedModel, setSelectedModel] = useState<ModelId>('gemini-2.0-flash');
   const [isSpeechEnabled, setIsSpeechEnabled] = useState(true);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const chatRef = useRef<any>(null);
