@@ -59,7 +59,6 @@ When using voice input, Azure Speech Services provides ultra-low latency through
 - **Immediate feedback**: Partial results appear instantly in the UI
 - **Recognized text sent immediately**: As soon as a complete utterance is detected, it's sent to the AI
 
-**Result:** Natural conversation flow where the AI can start thinking about its response even before you've finished your complete sentence.
 
 ### 2. Ultra-Fast AI Provider (Groq)
 - **Groq as default provider** for near-instantaneous inference
@@ -75,11 +74,6 @@ When using voice input, Azure Speech Services provides ultra-low latency through
 ### 4. Parallel Audio Processing Pipeline (Voice Output)
 The Swiss German audio generation is optimized with a sophisticated pipeline:
 
-```
-AI Response Stream → Sentence Extraction → Parallel TTS Processing → Audio Queue → Sequential Playback
-```
-
-**How it works:**
 1. **Stream parsing**: Text chunks are parsed in real-time to extract complete sentences
 2. **Immediate processing**: As soon as the first sentence is complete (~300ms), it's sent to STT4SG for Swiss German TTS
 3. **TTS generation**: Audio generation takes ~500-1000ms depending on sentence length
@@ -91,7 +85,6 @@ AI Response Stream → Sentence Extraction → Parallel TTS Processing → Audio
 - Time for TTS generation: ~500-1000ms (depends on sentence length)
 - **Total time to first audio: ~800-1300ms**
 
-**Result:** Despite the TTS processing time, the conversational flow feels natural because users see text immediately and hear audio shortly after, while subsequent sentences play continuously without gaps.
 
 ## Prerequisites
 
