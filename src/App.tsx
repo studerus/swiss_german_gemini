@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { Box, Container, TextField, IconButton, Paper, Typography, List, ListItem, ListItemText, CircularProgress, Select, MenuItem, FormControl, InputLabel, Switch, FormControlLabel } from '@mui/material';
-import { Send as SendIcon, VolumeUp, VolumeOff, Mic, MicOff } from '@mui/icons-material';
-import { GoogleGenerativeAI } from '@google/generative-ai';
+import { Send as SendIcon, VolumeUp, VolumeOff, Mic, MicOff, AddCircleOutline } from '@mui/icons-material';
+import { GoogleGenAI } from '@google/genai';
 import * as speechsdk from 'microsoft-cognitiveservices-speech-sdk';
 import { Client } from "@gradio/client";
 
@@ -15,8 +15,10 @@ interface ModelSettings {
 }
 
 const AVAILABLE_MODELS = [
-  { id: 'gemini-2.0-flash', name: 'Gemini 2.0 Flash' },
-  { id: 'gemini-pro', name: 'Gemini Pro' }
+  { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash (empfohlen)' },
+  { id: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro (fortgeschritten)' },
+  { id: 'gemini-2.5-flash-lite', name: 'Gemini 2.5 Flash-Lite (schnell)' },
+  { id: 'gemini-2.0-flash', name: 'Gemini 2.0 Flash (legacy)' }
 ] as const;
 
 const AVAILABLE_DIALECTS = [
@@ -69,9 +71,10 @@ function App() {
   const [messages, setMessages] = useState<Array<{ text: string; isUser: boolean }>>([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [selectedModel, setSelectedModel] = useState<ModelId>('gemini-2.0-flash');
+  const [selectedModel, setSelectedModel] = useState<ModelId>('gemini-2.5-flash');
   const [isSpeechEnabled, setIsSpeechEnabled] = useState(true);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const aiRef = useRef<GoogleGenAI | null>(null);
   const chatRef = useRef<any>(null);
   const API_KEY = import.meta.env.VITE_GEMINI_API_KEY || '';
   const SPEECH_KEY = import.meta.env.VITE_AZURE_SPEECH_KEY || '';
@@ -233,24 +236,27 @@ Es kann sein, dass Inputs falsch transkribiert werden. Falls du also zusammenhan
 
   const initializeChat = () => {
     if (API_KEY) {
-      const genAI = new GoogleGenerativeAI(API_KEY);
-      const model = genAI.getGenerativeModel({ model: selectedModel });
+      // Initialize AI client if not already done
+      if (!aiRef.current) {
+        aiRef.current = new GoogleGenAI({ apiKey: API_KEY });
+      }
       
       // Kombiniere System Prompt mit der bisherigen Konversation
       const history = [
-        { role: 'model', parts: modelSettings.systemPrompt },
+        { role: 'model', parts: [{ text: modelSettings.systemPrompt }] },
         ...messages.map(msg => ({
           role: msg.isUser ? 'user' : 'model',
-          parts: msg.text
+          parts: [{ text: msg.text }]
         }))
       ];
       
-      chatRef.current = model.startChat({
-        history: history,
-        generationConfig: {
+      chatRef.current = aiRef.current.chats.create({
+        model: selectedModel,
+        config: {
           maxOutputTokens: modelSettings.maxTokens,
           temperature: modelSettings.temperature,
         },
+        history: history,
       });
     }
   };
@@ -284,25 +290,27 @@ Es kann sein, dass Inputs falsch transkribiert werden. Falls du also zusammenhan
       // Fügen Sie eine leere Modell-Antwort hinzu
       setMessages(prevMessages => [...prevMessages, { text: '', isUser: false }]);
       
-      // Erstelle einen neuen Chat mit der aktuellen History
-      const genAI = new GoogleGenerativeAI(API_KEY);
-      const model = genAI.getGenerativeModel({ model: selectedModel });
+      // Initialize AI client if not already done
+      if (!aiRef.current) {
+        aiRef.current = new GoogleGenAI({ apiKey: API_KEY });
+      }
       
       // Kombiniere System Prompt mit der bisherigen Konversation
       const history = [
-        { role: 'model', parts: modelSettings.systemPrompt },
+        { role: 'model', parts: [{ text: modelSettings.systemPrompt }] },
         ...messages.map(msg => ({
           role: msg.isUser ? 'user' : 'model',
-          parts: msg.text
+          parts: [{ text: msg.text }]
         }))
       ];
       
-      chatRef.current = model.startChat({
-        history: history,
-        generationConfig: {
+      chatRef.current = aiRef.current.chats.create({
+        model: selectedModel,
+        config: {
           maxOutputTokens: modelSettings.maxTokens,
           temperature: modelSettings.temperature,
         },
+        history: history,
       });
 
       // Setze alle relevanten Variablen zurück
@@ -313,11 +321,11 @@ Es kann sein, dass Inputs falsch transkribiert werden. Falls du also zusammenhan
       let fullResponse = '';
       let currentBuffer = '';
 
-      // Verwenden Sie den aktualisierten Chat
-      const result = await chatRef.current.sendMessageStream(textToSend);
+      // Verwenden Sie den aktualisierten Chat mit der neuen API
+      const result = await chatRef.current.sendMessageStream({ message: textToSend });
 
-      for await (const chunk of result.stream) {
-        const chunkText = chunk.text();
+      for await (const chunk of result) {
+        const chunkText = chunk.text || '';
         fullResponse += chunkText;
         
         setMessages(prev => {
@@ -863,10 +871,26 @@ Es kann sein, dass Inputs falsch transkribiert werden. Falls du also zusammenhan
 
         {/* Rechte Spalte - Chat */}
         <Paper elevation={3} sx={{ flexGrow: 1, display: 'flex', flexDirection: 'column' }}>
-          <Box sx={{ p: 2, borderBottom: 1, borderColor: 'divider' }}>
+          <Box sx={{ p: 2, borderBottom: 1, borderColor: 'divider', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <Typography variant="h4">
               Gemini Chat
             </Typography>
+            <IconButton
+              color="primary"
+              onClick={() => {
+                setMessages([]);
+                initializeChat();
+              }}
+              title="Neuer Chat starten"
+              sx={{ 
+                '&:hover': { 
+                  backgroundColor: 'primary.light',
+                  color: 'white'
+                } 
+              }}
+            >
+              <AddCircleOutline fontSize="large" />
+            </IconButton>
           </Box>
           
           <Box sx={{ flexGrow: 1, overflow: 'auto', p: 2 }}>
@@ -903,23 +927,6 @@ Es kann sein, dass Inputs falsch transkribiert werden. Falls du also zusammenhan
           </Box>
 
           <Box sx={{ p: 2, borderTop: 1, borderColor: 'divider' }}>
-            <Paper 
-              elevation={1} 
-              sx={{ 
-                p: 1, 
-                mb: 2, 
-                cursor: 'pointer', 
-                '&:hover': { backgroundColor: 'primary.light', color: 'white' } 
-              }}
-              onClick={() => {
-                setMessages([]);
-                initializeChat();
-              }}
-            >
-              <Typography variant="body1" align="center">
-                Neuer Chat starten
-              </Typography>
-            </Paper>
             <Box sx={{ display: 'flex', gap: 1 }}>
               <TextField
                 fullWidth
