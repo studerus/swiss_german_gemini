@@ -81,8 +81,10 @@ function App() {
   const SPEECH_REGION = import.meta.env.VITE_AZURE_SPEECH_REGION || '';
   const [isListening, setIsListening] = useState(false);
   const recognizer = useRef<speechsdk.SpeechRecognizer | null>(null);
+  const [isRecognizing, setIsRecognizing] = useState(false);
+  const isRecognizingRef = useRef(false);
   const [modelSettings, setModelSettings] = useState<ModelSettings>({
-    systemPrompt: `Du bist ein freundlicher Roboter aus Basel namens Hans. Antworte auf Hochdeutsch. Du funktionierst so, dass du durch speech to text in Realzeit transkribiertes Audio als Input bekommst.
+    systemPrompt: `Du bist ein freundlicher Roboter namens Hans. Du funktionierst so, dass du durch speech to text in Realzeit transkribiertes Audio als Input bekommst.
 Es kann sein, dass Inputs falsch transkribiert werden. Falls du also zusammenhangslos wirkende Inputs bekommst, frage nach, ob du es richtig verstanden hast.`,
     maxTokens: 500,
     temperature: 0.7
@@ -409,19 +411,76 @@ Es kann sein, dass Inputs falsch transkribiert werden. Falls du also zusammenhan
           if (e.result.text) {
             console.log(`ERKENNE: ${e.result.text}`);
             stopSpeech();
+            
+            // Update or create temporary user message with partial result
+            setMessages(prev => {
+              const newMessages = [...prev];
+              // Check if last message is a temporary recognizing message
+              if (newMessages.length > 0 && newMessages[newMessages.length - 1].isUser && isRecognizingRef.current) {
+                // Update existing temporary message
+                newMessages[newMessages.length - 1] = {
+                  text: e.result.text,
+                  isUser: true
+                };
+              } else {
+                // Add new temporary message
+                newMessages.push({
+                  text: e.result.text,
+                  isUser: true
+                });
+              }
+              return newMessages;
+            });
+            isRecognizingRef.current = true;
+            setIsRecognizing(true);
           }
         };
 
         newRecognizer.recognized = async (_, e) => {
           if (e.result.reason === speechsdk.ResultReason.RecognizedSpeech && e.result.text) {
             console.log(`ERKANNT: ${e.result.text}`);
+            isRecognizingRef.current = false;
+            setIsRecognizing(false);
+            
+            // Remove temporary message before sending
+            setMessages(prev => {
+              const newMessages = [...prev];
+              // Remove last message if it was a temporary recognizing message
+              if (newMessages.length > 0 && newMessages[newMessages.length - 1].isUser) {
+                newMessages.pop();
+              }
+              return newMessages;
+            });
+            
             await handleSend(e.result.text);
+          } else {
+            // If recognition failed or was cancelled, remove temporary message
+            isRecognizingRef.current = false;
+            setIsRecognizing(false);
+            setMessages(prev => {
+              const newMessages = [...prev];
+              if (newMessages.length > 0 && newMessages[newMessages.length - 1].isUser) {
+                newMessages.pop();
+              }
+              return newMessages;
+            });
           }
         };
 
         newRecognizer.canceled = (_, e) => {
           console.log(`ABGEBROCHEN: ${e.errorDetails}`);
           setIsListening(false);
+          isRecognizingRef.current = false;
+          setIsRecognizing(false);
+          
+          // Remove temporary message if present
+          setMessages(prev => {
+            const newMessages = [...prev];
+            if (newMessages.length > 0 && newMessages[newMessages.length - 1].isUser) {
+              newMessages.pop();
+            }
+            return newMessages;
+          });
         };
 
         recognizer.current = newRecognizer;
@@ -445,10 +504,36 @@ Es kann sein, dass Inputs falsch transkribiert werden. Falls du also zusammenhan
           () => {
             setIsListening(false);
             console.log("Spracherkennung gestoppt");
+            
+            // Remove temporary message if present
+            if (isRecognizingRef.current) {
+              isRecognizingRef.current = false;
+              setIsRecognizing(false);
+              setMessages(prev => {
+                const newMessages = [...prev];
+                if (newMessages.length > 0 && newMessages[newMessages.length - 1].isUser) {
+                  newMessages.pop();
+                }
+                return newMessages;
+              });
+            }
           },
           (error) => {
             console.error("Fehler beim Stoppen der Spracherkennung:", error);
             setIsListening(false);
+            
+            // Remove temporary message if present
+            if (isRecognizingRef.current) {
+              isRecognizingRef.current = false;
+              setIsRecognizing(false);
+              setMessages(prev => {
+                const newMessages = [...prev];
+                if (newMessages.length > 0 && newMessages[newMessages.length - 1].isUser) {
+                  newMessages.pop();
+                }
+                return newMessages;
+              });
+            }
           }
         );
       } catch (error) {
@@ -895,28 +980,33 @@ Es kann sein, dass Inputs falsch transkribiert werden. Falls du also zusammenhan
           
           <Box sx={{ flexGrow: 1, overflow: 'auto', p: 2 }}>
             <List>
-              {messages.map((message, index) => (
-                <ListItem
-                  key={index}
-                  sx={{
-                    justifyContent: message.isUser ? 'flex-end' : 'flex-start',
-                    mb: 1,
-                  }}
-                >
-                  <Paper
-                    elevation={1}
+              {messages.map((message, index) => {
+                const isTemporary = isRecognizing && index === messages.length - 1 && message.isUser;
+                return (
+                  <ListItem
+                    key={index}
                     sx={{
-                      p: 2,
-                      maxWidth: '70%',
-                      backgroundColor: message.isUser ? 'primary.light' : 'grey.100',
-                      color: message.isUser ? 'white' : 'text.primary',
-                      whiteSpace: 'pre-wrap',
+                      justifyContent: message.isUser ? 'flex-end' : 'flex-start',
+                      mb: 1,
                     }}
                   >
-                    <ListItemText primary={message.text} />
-                  </Paper>
-                </ListItem>
-              ))}
+                    <Paper
+                      elevation={1}
+                      sx={{
+                        p: 2,
+                        maxWidth: '70%',
+                        backgroundColor: message.isUser ? 'primary.light' : 'grey.100',
+                        color: message.isUser ? 'white' : 'text.primary',
+                        whiteSpace: 'pre-wrap',
+                        opacity: isTemporary ? 0.7 : 1,
+                        fontStyle: isTemporary ? 'italic' : 'normal',
+                      }}
+                    >
+                      <ListItemText primary={message.text} />
+                    </Paper>
+                  </ListItem>
+                );
+              })}
             </List>
             {isLoading && (
               <Box display="flex" justifyContent="center" my={2}>
