@@ -1,7 +1,10 @@
-import { useState, useRef, useEffect, useCallback, memo } from 'react';
+import { useState, useRef, useEffect, useCallback, memo, useMemo } from 'react';
 import { Box, Container, TextField, IconButton, Paper, Typography, List, ListItem, ListItemText, CircularProgress, Select, MenuItem, FormControl, InputLabel, Switch, FormControlLabel } from '@mui/material';
 import { Send as SendIcon, VolumeUp, VolumeOff, Mic, MicOff, AddCircleOutline } from '@mui/icons-material';
-import { GoogleGenAI } from '@google/genai';
+import { streamText } from 'ai';
+import { createGoogleGenerativeAI } from '@ai-sdk/google';
+import { createOpenAI } from '@ai-sdk/openai';
+import { createGroq } from '@ai-sdk/groq';
 import * as speechsdk from 'microsoft-cognitiveservices-speech-sdk';
 import { Client } from "@gradio/client";
 
@@ -14,12 +17,88 @@ interface ModelSettings {
   temperature: number;
 }
 
-const AVAILABLE_MODELS = [
-  { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash (empfohlen)' },
-  { id: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro (fortgeschritten)' },
-  { id: 'gemini-2.5-flash-lite', name: 'Gemini 2.5 Flash-Lite (schnell)' },
-  { id: 'gemini-2.0-flash', name: 'Gemini 2.0 Flash (legacy)' }
-] as const;
+type ProviderId = 'google' | 'openai' | 'groq';
+
+interface ModelConfig {
+  id: string;
+  name: string;
+}
+
+interface ProviderConfig {
+  id: ProviderId;
+  name: string;
+  models: ModelConfig[];
+}
+
+const AVAILABLE_PROVIDERS: ProviderConfig[] = [
+  { 
+    id: 'google', 
+    name: 'Google Gemini',
+    models: [
+      // Gemini 2.5 Series (Latest - June 2025)
+      { id: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro' },
+      { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash (recommended)' },
+      { id: 'gemini-2.5-flash-preview-09-2025', name: 'Gemini 2.5 Flash Preview' },
+      { id: 'gemini-2.5-flash-lite', name: 'Gemini 2.5 Flash-Lite' },
+      { id: 'gemini-2.5-flash-lite-preview-09-2025', name: 'Gemini 2.5 Flash-Lite Preview' },
+      // Gemini 2.0 Series
+      { id: 'gemini-2.0-flash', name: 'Gemini 2.0 Flash' },
+      { id: 'gemini-2.0-flash-exp', name: 'Gemini 2.0 Flash Experimental' },
+      { id: 'gemini-2.0-flash-lite', name: 'Gemini 2.0 Flash-Lite' },
+      // Gemini 1.5 Series (Legacy)
+      { id: 'gemini-1.5-flash', name: 'Gemini 1.5 Flash (Legacy)' },
+      { id: 'gemini-1.5-pro', name: 'Gemini 1.5 Pro (Legacy)' },
+    ]
+  },
+  { 
+    id: 'openai', 
+    name: 'OpenAI',
+    models: [
+      // --- GPT-5 Series ---
+      { id: 'gpt-5', name: 'GPT-5' },
+      { id: 'gpt-5-pro', name: 'GPT-5 Pro' },
+      { id: 'gpt-5-mini', name: 'GPT-5 Mini' },
+      { id: 'gpt-5-nano', name: 'GPT-5 Nano' },
+      // --- GPT-4 Series ---
+      { id: 'gpt-4o', name: 'GPT-4o' },
+      { id: 'gpt-4o-mini', name: 'GPT-4o Mini' },
+      { id: 'gpt-4.1', name: 'GPT-4.1' },
+      { id: 'gpt-4.1-mini', name: 'GPT-4.1 Mini' },
+      { id: 'gpt-4.1-nano', name: 'GPT-4.1 Nano' },
+      { id: 'gpt-4-turbo', name: 'GPT-4 Turbo' },
+      { id: 'gpt-4', name: 'GPT-4' },
+      // --- Open-Weight Series ---
+      { id: 'gpt-oss-120b', name: 'GPT-OSS 120B' },
+      { id: 'gpt-oss-20b', name: 'GPT-OSS 20B' },
+      // --- Preview & Specialized ---
+      { id: 'gpt-4o-search-preview', name: 'GPT-4o Search (Preview)' },
+      { id: 'gpt-4o-mini-search-preview', name: 'GPT-4o Mini Search (Preview)' },
+      // --- Legacy ---
+      { id: 'gpt-3.5-turbo', name: 'GPT-3.5 Turbo' },
+    ]
+  },
+  { 
+    id: 'groq', 
+    name: 'Groq',
+    models: [
+      // Production
+      { id: 'llama-3.3-70b-versatile', name: 'Llama 3.3 70B (recommended)' },
+      { id: 'llama-3.1-8b-instant', name: 'Llama 3.1 8B' },
+      { id: 'openai/gpt-oss-120b', name: 'GPT-OSS 120B' },
+      { id: 'openai/gpt-oss-20b', name: 'GPT-OSS 20B' },
+      { id: 'mixtral-8x7b-32768', name: 'Mixtral 8x7B' },
+      { id: 'gemma2-9b-it', name: 'Gemma 2 9B' },
+      // Systems
+      { id: 'groq/compound', name: 'Groq Compound (System)' },
+      { id: 'groq/compound-mini', name: 'Groq Compound Mini (System)' },
+      // Preview
+      { id: 'meta-llama/llama-4-maverick-17b-128e-instruct', name: 'Llama 4 Maverick 17B (Preview)' },
+      { id: 'meta-llama/llama-4-scout-17b-16e-instruct', name: 'Llama 4 Scout 17B (Preview)' },
+      { id: 'moonshotai/kimi-k2-instruct-0905', name: 'Kimi K2 Instruct (Preview)' },
+      { id: 'qwen/qwen3-32b', name: 'Qwen3 32B (Preview)' },
+    ]
+  }
+];
 
 const AVAILABLE_DIALECTS = [
   { id: 'Aargau', name: 'Aargauerdeutsch' },
@@ -31,8 +110,6 @@ const AVAILABLE_DIALECTS = [
   { id: 'Valais', name: 'Walliserdeutsch' },
   { id: 'Zürich', name: 'Zürichdeutsch' }
 ] as const;
-
-type ModelId = typeof AVAILABLE_MODELS[number]['id'];
 
 interface TTSClient {
   client: Promise<Client> | null;
@@ -105,14 +182,23 @@ function App() {
   const [messages, setMessages] = useState<Array<{ text: string; isUser: boolean }>>([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [selectedModel, setSelectedModel] = useState<ModelId>('gemini-2.5-flash-lite');
+  const [selectedProvider, setSelectedProvider] = useState<ProviderId>('groq');
+  const [selectedModel, setSelectedModel] = useState<string>('llama-3.3-70b-versatile');
   const [isSpeechEnabled, setIsSpeechEnabled] = useState(true);
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const aiRef = useRef<GoogleGenAI | null>(null);
-  const chatRef = useRef<any>(null);
-  const API_KEY = import.meta.env.VITE_GEMINI_API_KEY || '';
+  
+  // API Keys for different providers
+  const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY || '';
+  const OPENAI_API_KEY = import.meta.env.VITE_OPENAI_API_KEY || '';
+  const GROQ_API_KEY = import.meta.env.VITE_GROQ_API_KEY || '';
   const SPEECH_KEY = import.meta.env.VITE_AZURE_SPEECH_KEY || '';
   const SPEECH_REGION = import.meta.env.VITE_AZURE_SPEECH_REGION || '';
+
+  // Create provider instances with API keys (memoized to avoid recreation on every render)
+  const google = useMemo(() => createGoogleGenerativeAI({ apiKey: GEMINI_API_KEY }), [GEMINI_API_KEY]);
+  const openai = useMemo(() => createOpenAI({ apiKey: OPENAI_API_KEY }), [OPENAI_API_KEY]);
+  const groq = useMemo(() => createGroq({ apiKey: GROQ_API_KEY }), [GROQ_API_KEY]);
+
   const [isListening, setIsListening] = useState(false);
   const recognizer = useRef<speechsdk.SpeechRecognizer | null>(null);
   const [isRecognizing, setIsRecognizing] = useState(false);
@@ -146,6 +232,20 @@ Es kann sein, dass Inputs falsch transkribiert werden. Falls du also zusammenhan
   useEffect(() => {
     scrollToBottom();
   }, [messages]);
+
+  // Helper function to get the model instance based on provider
+  const getModelInstance = () => {
+    switch (selectedProvider) {
+      case 'google':
+        return google(selectedModel);
+      case 'openai':
+        return openai(selectedModel);
+      case 'groq':
+        return groq(selectedModel);
+      default:
+        return google(selectedModel);
+    }
+  };
 
   const cleanTextForSpeech = (text: string) => {
     return text
@@ -245,7 +345,6 @@ Es kann sein, dass Inputs falsch transkribiert werden. Falls du also zusammenhan
     } finally {
       isPlayingAudioRef.current = false;
       if (audioQueue.current.length > 0) {
-        debugLog('Items arrived while playing, re-run queue');
         isPlayingAudioRef.current = true;
         playNextInQueue();
       }
@@ -265,54 +364,36 @@ Es kann sein, dass Inputs falsch transkribiert werden. Falls du also zusammenhan
     
     // Reset des Playback-Status
     isPlayingAudioRef.current = false;
-    
-    debugLog('Speech output stopped');
   };
 
-  const initializeChat = () => {
-    if (API_KEY) {
-      // Initialize AI client if not already done
-      if (!aiRef.current) {
-        aiRef.current = new GoogleGenAI({ apiKey: API_KEY });
-      }
-      
-      // Kombiniere System Prompt mit der bisherigen Konversation
-      const history = [
-        { role: 'model', parts: [{ text: modelSettings.systemPrompt }] },
-        ...messages.map(msg => ({
-          role: msg.isUser ? 'user' : 'model',
-          parts: [{ text: msg.text }]
-        }))
-      ];
-      
-      chatRef.current = aiRef.current.chats.create({
-        model: selectedModel,
-        config: {
-          maxOutputTokens: modelSettings.maxTokens,
-          temperature: modelSettings.temperature,
-        },
-        history: history,
-      });
-    }
-  };
+
+  const handleProviderChange = useCallback((event: any) => {
+    const newProvider = event.target.value as ProviderId;
+    setSelectedProvider(newProvider);
+    // Set default model for the new provider
+    const defaultModel = AVAILABLE_PROVIDERS.find(p => p.id === newProvider)?.models[0].id || '';
+    setSelectedModel(defaultModel);
+    setMessages([]); // Clear chat history on provider change
+  }, []);
 
   const handleModelChange = useCallback((event: any) => {
-    setSelectedModel(event.target.value as ModelId);
-    setMessages([]); // Lösche Chat-Historie bei Modellwechsel
-    initializeChat(); // Initialisiere Chat neu mit leerem Verlauf
+    setSelectedModel(event.target.value);
   }, []);
 
   const handleSend = async (messageText?: string) => {
     const textToSend = messageText || input.trim();
     
-    if (!textToSend || !API_KEY) return;
+    if (!textToSend) return;
 
-    // Initialisiere Chat falls noch nicht geschehen
-    if (!chatRef.current) {
-      initializeChat();
+    // Check if API key is available for the selected provider
+    const apiKey = selectedProvider === 'google' ? GEMINI_API_KEY :
+                   selectedProvider === 'openai' ? OPENAI_API_KEY :
+                   selectedProvider === 'groq' ? GROQ_API_KEY : '';
+    
+    if (!apiKey) {
+      console.error(`API key for ${selectedProvider} not configured`);
+      return;
     }
-
-    if (!chatRef.current) return;
 
     // Only stop speech if audio is actually playing
     if (isPlayingAudioRef.current) {
@@ -320,51 +401,50 @@ Es kann sein, dass Inputs falsch transkribiert werden. Falls du also zusammenhan
     }
     setInput('');
     
-    // Fügen Sie die Benutzernachricht zum UI hinzu
+    // Add user message to UI
     setMessages(prevMessages => [...prevMessages, { text: textToSend, isUser: true }]);
     setIsLoading(true);
 
     try {
-      // Fügen Sie eine leere Modell-Antwort hinzu
+      // Add empty assistant message
       setMessages(prevMessages => [...prevMessages, { text: '', isUser: false }]);
       
-      // Initialize AI client if not already done
-      if (!aiRef.current) {
-        aiRef.current = new GoogleGenAI({ apiKey: API_KEY });
-      }
-      
-      // Kombiniere System Prompt mit der bisherigen Konversation
-      const history = [
-        { role: 'model', parts: [{ text: modelSettings.systemPrompt }] },
+      // Build messages array for the AI SDK
+      const conversationMessages: Array<{role: 'system' | 'user' | 'assistant', content: string}> = [
+        { role: 'system', content: modelSettings.systemPrompt },
         ...messages.map(msg => ({
-          role: msg.isUser ? 'user' : 'model',
-          parts: [{ text: msg.text }]
-        }))
+          role: msg.isUser ? 'user' as const : 'assistant' as const,
+          content: msg.text
+        })),
+        { role: 'user', content: textToSend }
       ];
-      
-      chatRef.current = aiRef.current.chats.create({
-        model: selectedModel,
-        config: {
-          maxOutputTokens: modelSettings.maxTokens,
-          temperature: modelSettings.temperature,
-        },
-        history: history,
-      });
 
-      // Setze alle relevanten Variablen zurück
+      // Reset all relevant variables
       firstSentenceTimeRef.current = null;
       startTimeRef.current = performance.now();
-      nextSequenceNumberRef.current = 0; // Setze Sequenzzähler zurück
+      nextSequenceNumberRef.current = 0; // Reset sequence counter
       let firstSentenceReceivedTime: number | null = null;
       let fullResponse = '';
       let currentBuffer = '';
 
-      // Verwenden Sie den aktualisierten Chat mit der neuen API
-      const result = await chatRef.current.sendMessageStream({ message: textToSend });
+      // Use AI SDK streamText
+      const result = await streamText({
+        model: getModelInstance(),
+        messages: conversationMessages,
+        maxTokens: modelSettings.maxTokens,
+        temperature: modelSettings.temperature,
+        onError: ({ error }) => {
+          console.error('Error during streaming:', error);
+          setMessages(prev => {
+            const newMessages = [...prev.slice(0, -1)]; // remove the empty message placeholder
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            return [...newMessages, { text: `Fehler: ${errorMessage}`, isUser: false }];
+          });
+        },
+      });
 
-      for await (const chunk of result) {
-        const chunkText = chunk.text || '';
-        fullResponse += chunkText;
+      for await (const chunk of result.textStream) {
+        fullResponse += chunk;
         
         setMessages(prev => {
           const newMessages = [...prev];
@@ -375,11 +455,11 @@ Es kann sein, dass Inputs falsch transkribiert werden. Falls du also zusammenhan
           return newMessages;
         });
 
-        currentBuffer += chunkText;
+        currentBuffer += chunk;
         
         const { sentences, remainder } = extractSentences(currentBuffer);
         if (sentences.length > 0) {
-          // Erster Satz empfangen
+          // First sentence received
           if (firstSentenceReceivedTime === null) {
             firstSentenceReceivedTime = performance.now();
             console.log(`[TTS Debug] First sentence received in ${Math.round(firstSentenceReceivedTime - startTimeRef.current)}ms`);
@@ -419,7 +499,6 @@ Es kann sein, dass Inputs falsch transkribiert werden. Falls du also zusammenhan
 
   const handleNewChat = useCallback(() => {
     setMessages([]);
-    initializeChat();
   }, []);
 
   const handleMicrophoneToggle = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
@@ -869,7 +948,6 @@ Es kann sein, dass Inputs falsch transkribiert werden. Falls du also zusammenhan
 
       // Wenn nichts spielt, Wiedergabe starten
       if (!isPlayingAudioRef.current) {
-        debugLog('Starting playback as nothing is playing');
         isPlayingAudioRef.current = true;
         playNextInQueue();
       }
@@ -887,7 +965,6 @@ Es kann sein, dass Inputs falsch transkribiert werden. Falls du also zusammenhan
 
   const generateAndQueueTTS = async (sentence: string) => {
     const sequence = nextSequenceNumberRef.current++;
-    debugLog('Queueing sentence for processing:', sentence, 'sequence:', sequence);
     
     // Füge den Satz zur Verarbeitungswarteschlange hinzu
     sentencesToProcess.current.push({
@@ -931,23 +1008,17 @@ Es kann sein, dass Inputs falsch transkribiert werden. Falls du also zusammenhan
     audioPlayerRef.current = new Audio();
     audioPlayerRef.current.crossOrigin = "anonymous";
     audioPlayerRef.current.onended = () => {
-      debugLog('Audio playback ended');
       playNextInQueue();
     };
     audioPlayerRef.current.onerror = (e) => {
       console.error('Audio playback error:', e);
-      debugLog('Audio error event:', e);
       playNextInQueue();
     };
-    audioPlayerRef.current.onplay = () => debugLog('Audio started playing');
-    audioPlayerRef.current.onloadeddata = () => debugLog('Audio data loaded');
 
     return () => {
       if (audioPlayerRef.current) {
         audioPlayerRef.current.onended = null;
         audioPlayerRef.current.onerror = null;
-        audioPlayerRef.current.onplay = null;
-        audioPlayerRef.current.onloadeddata = null;
       }
     }
   }, []);
@@ -962,6 +1033,24 @@ Es kann sein, dass Inputs falsch transkribiert werden. Falls du also zusammenhan
           </Typography>
           
           <FormControl fullWidth>
+            <InputLabel id="provider-select-label">Provider</InputLabel>
+            <Select
+              labelId="provider-select-label"
+              value={selectedProvider}
+              label="Provider"
+              onChange={handleProviderChange}
+              disabled={isLoading}
+              size="small"
+            >
+              {AVAILABLE_PROVIDERS.map((provider) => (
+                <MenuItem key={provider.id} value={provider.id}>
+                  {provider.name}
+                </MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+
+          <FormControl fullWidth>
             <InputLabel id="model-select-label">Modell</InputLabel>
             <Select
               labelId="model-select-label"
@@ -971,11 +1060,13 @@ Es kann sein, dass Inputs falsch transkribiert werden. Falls du also zusammenhan
               disabled={isLoading}
               size="small"
             >
-              {AVAILABLE_MODELS.map((model) => (
-                <MenuItem key={model.id} value={model.id}>
-                  {model.name}
-                </MenuItem>
-              ))}
+              {AVAILABLE_PROVIDERS
+                .find(p => p.id === selectedProvider)
+                ?.models.map((model) => (
+                  <MenuItem key={model.id} value={model.id}>
+                    {model.name}
+                  </MenuItem>
+                ))}
             </Select>
           </FormControl>
 
@@ -1065,7 +1156,7 @@ Es kann sein, dass Inputs falsch transkribiert werden. Falls du also zusammenhan
         <Paper elevation={3} sx={{ flexGrow: 1, display: 'flex', flexDirection: 'column' }}>
           <Box sx={{ p: 2, borderBottom: 1, borderColor: 'divider', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <Typography variant="h4">
-              Gemini Chat
+              AI Chat
             </Typography>
             <IconButton
               color="primary"

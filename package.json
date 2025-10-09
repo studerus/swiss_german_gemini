@@ -10,11 +10,14 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@ai-sdk/google": "^1.0.10",
+    "@ai-sdk/groq": "^1.0.8",
+    "@ai-sdk/openai": "^1.0.9",
     "@emotion/react": "^11.11.3",
     "@emotion/styled": "^11.11.0",
-    "@google/genai": "^1.0.0",
     "@mui/icons-material": "^5.15.5",
     "@mui/material": "^5.15.5",
+    "ai": "^4.0.38",
     "microsoft-cognitiveservices-speech-sdk": "^1.42.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0"
