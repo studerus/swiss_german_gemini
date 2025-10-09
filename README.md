@@ -6,7 +6,7 @@ A React-based chat application with multi-provider AI support (Google Gemini, Op
 
 ## Features
 
-### 🇨🇭 Swiss German Support
+### Swiss German Support
 - **Native Swiss German speech input and output**
 - **8 Swiss German dialects** supported:
   - Aargauerdeutsch
@@ -20,7 +20,7 @@ A React-based chat application with multi-provider AI support (Google Gemini, Op
 - Seamless voice conversations in your local dialect
 - Powered by [STT4SG](https://stt4sg.fhnw.ch/) - specialized Swiss German TTS from FHNW
 
-### 🤖 AI Provider Support
+### AI Provider Support
 - **Multiple AI Providers**: Switch between Google Gemini, OpenAI, and Groq
 - **Groq as Default**: Ultra-low latency inference (set as default provider)
 - **Extensive Model Selection**:
@@ -29,7 +29,7 @@ A React-based chat application with multi-provider AI support (Google Gemini, Op
   - **OpenAI**: GPT-5, GPT-4o, GPT-4.1, o3/o4 reasoning models, and more
 - Real-time streaming responses with the Vercel AI SDK
 
-### 💬 User Interface
+### User Interface
 - Modern and responsive UI with Material-UI
 - Real-time streaming chat
 - Configurable model settings (temperature, max tokens, system prompt)
@@ -51,18 +51,7 @@ A React-based chat application with multi-provider AI support (Google Gemini, Op
 
 This application implements several strategies to minimize response latency and provide a fluid conversational experience:
 
-### 1. Ultra-Fast AI Provider (Groq)
-- **Groq as default provider** for near-instantaneous inference
-- Hardware-optimized LPU™ (Language Processing Unit) architecture
-- **~300ms to first sentence**: Typically 10x+ faster than traditional cloud providers
-- Text appears on screen almost immediately
-
-### 2. Real-Time Text Streaming
-- Responses are **streamed token-by-token** as they're generated
-- User sees the first words within ~300ms
-- No waiting for complete response before display
-
-### 3. Continuous Streaming Speech-to-Text (Input)
+### 1. Continuous Streaming Speech-to-Text (Voice Input)
 When using voice input, Azure Speech Services provides ultra-low latency through continuous streaming:
 
 - **Real-time transcription**: Speech is transcribed **while you're still speaking**
@@ -72,7 +61,18 @@ When using voice input, Azure Speech Services provides ultra-low latency through
 
 **Result:** Natural conversation flow where the AI can start thinking about its response even before you've finished your complete sentence.
 
-### 4. Parallel Audio Processing Pipeline (Output)
+### 2. Ultra-Fast AI Provider (Groq)
+- **Groq as default provider** for near-instantaneous inference
+- Hardware-optimized LPU™ (Language Processing Unit) architecture
+- **~300ms to first sentence**: Typically 10x+ faster than traditional cloud providers
+- Text appears on screen almost immediately
+
+### 3. Real-Time Text Streaming
+- Responses are **streamed token-by-token** as they're generated
+- User sees the first words within ~300ms
+- No waiting for complete response before display
+
+### 4. Parallel Audio Processing Pipeline (Voice Output)
 The Swiss German audio generation is optimized with a sophisticated pipeline:
 
 ```
