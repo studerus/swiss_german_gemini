@@ -151,9 +151,6 @@ No Azure account needed for this basic setup!
 - **STT4SG**: Specialized Swiss German speech synthesis by FHNW
 - **Microsoft Azure Speech Services**: High-quality Speech-to-Text
 
-### Why Groq as Default?
-
-Groq is set as the default provider because it offers **significantly lower latency** compared to other providers, resulting in near-instantaneous responses. This makes for a much more natural and fluid conversation experience, especially important for voice interactions. Groq also offers a **generous free tier**, making it ideal for development and testing.
 
 ## API Key Setup
 
