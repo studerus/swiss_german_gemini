@@ -1,12 +1,12 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback, memo } from 'react';
 import { Box, Container, TextField, IconButton, Paper, Typography, List, ListItem, ListItemText, CircularProgress, Select, MenuItem, FormControl, InputLabel, Switch, FormControlLabel } from '@mui/material';
 import { Send as SendIcon, VolumeUp, VolumeOff, Mic, MicOff, AddCircleOutline } from '@mui/icons-material';
 import { GoogleGenAI } from '@google/genai';
 import * as speechsdk from 'microsoft-cognitiveservices-speech-sdk';
 import { Client } from "@gradio/client";
 
-// Modulweites Flag zur Vermeidung der mehrfachen Initialisierung
-let isTTSClientInitializedOutside = false;
+// Modulweite Variable zur Vermeidung der mehrfachen Initialisierung
+let ttsClientPromise: Promise<Client> | null = null;
 
 interface ModelSettings {
   systemPrompt: string;
@@ -67,11 +67,45 @@ interface AudioResponse {
   fn_index: number;
 }
 
+// Memoized Message Component for better performance
+interface MessageItemProps {
+  message: { text: string; isUser: boolean };
+  isTemporary: boolean;
+}
+
+const MessageItem = memo(({ message, isTemporary }: MessageItemProps) => {
+  return (
+    <ListItem
+      sx={{
+        justifyContent: message.isUser ? 'flex-end' : 'flex-start',
+        mb: 1,
+      }}
+    >
+      <Paper
+        elevation={1}
+        sx={{
+          p: 2,
+          maxWidth: '70%',
+          backgroundColor: message.isUser ? 'primary.light' : 'grey.100',
+          color: message.isUser ? 'white' : 'text.primary',
+          whiteSpace: 'pre-wrap',
+          opacity: isTemporary ? 0.7 : 1,
+          fontStyle: isTemporary ? 'italic' : 'normal',
+        }}
+      >
+        <ListItemText primary={message.text} />
+      </Paper>
+    </ListItem>
+  );
+});
+
+MessageItem.displayName = 'MessageItem';
+
 function App() {
   const [messages, setMessages] = useState<Array<{ text: string; isUser: boolean }>>([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [selectedModel, setSelectedModel] = useState<ModelId>('gemini-2.5-flash');
+  const [selectedModel, setSelectedModel] = useState<ModelId>('gemini-2.5-flash-lite');
   const [isSpeechEnabled, setIsSpeechEnabled] = useState(true);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const aiRef = useRef<GoogleGenAI | null>(null);
@@ -89,7 +123,7 @@ Es kann sein, dass Inputs falsch transkribiert werden. Falls du also zusammenhan
     maxTokens: 500,
     temperature: 0.7
   });
-  const [ttsClient, setTTSClient] = useState<TTSClient>({
+  const [_ttsClient, setTTSClient] = useState<TTSClient>({
     client: null,
     isReady: false
   });
@@ -165,7 +199,6 @@ Es kann sein, dass Inputs falsch transkribiert werden. Falls du also zusammenhan
         if (audioData?.url) {
           try {
             const blobUrl = await createAudioBlobUrl(audioData.url);
-            debugLog('Setting blob URL:', blobUrl);
             actualPlayableUrl = blobUrl;
           } catch (blobError) {
             debugLog('Falling back to direct URL');
@@ -263,11 +296,11 @@ Es kann sein, dass Inputs falsch transkribiert werden. Falls du also zusammenhan
     }
   };
 
-  const handleModelChange = (event: any) => {
+  const handleModelChange = useCallback((event: any) => {
     setSelectedModel(event.target.value as ModelId);
     setMessages([]); // Lösche Chat-Historie bei Modellwechsel
     initializeChat(); // Initialisiere Chat neu mit leerem Verlauf
-  };
+  }, []);
 
   const handleSend = async (messageText?: string) => {
     const textToSend = messageText || input.trim();
@@ -281,7 +314,10 @@ Es kann sein, dass Inputs falsch transkribiert werden. Falls du also zusammenhan
 
     if (!chatRef.current) return;
 
-    stopSpeech();
+    // Only stop speech if audio is actually playing
+    if (isPlayingAudioRef.current) {
+      stopSpeech();
+    }
     setInput('');
     
     // Fügen Sie die Benutzernachricht zum UI hinzu
@@ -365,10 +401,38 @@ Es kann sein, dass Inputs falsch transkribiert werden. Falls du also zusammenhan
     }
   };
 
-  // Erstelle einen separaten Click-Handler für den Button
-  const handleClick = () => {
+  // Event handlers memoized for performance
+  const handleInputChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    setInput(e.target.value);
+  }, []);
+
+  const handleKeyPress = useCallback((e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      handleSend();
+    }
+  }, [handleSend]);
+
+  const handleClick = useCallback(() => {
     handleSend();
-  };
+  }, [handleSend]);
+
+  const handleNewChat = useCallback(() => {
+    setMessages([]);
+    initializeChat();
+  }, []);
+
+  const handleMicrophoneToggle = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.checked) {
+      initializeRecognizer();
+    } else {
+      stopListening();
+    }
+  }, []);
+
+  const handleSpeechToggle = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    setIsSpeechEnabled(e.target.checked);
+  }, []);
 
   const initializeRecognizer = async () => {
     try {
@@ -410,7 +474,11 @@ Es kann sein, dass Inputs falsch transkribiert werden. Falls du also zusammenhan
         newRecognizer.recognizing = (_, e) => {
           if (e.result.text) {
             console.log(`ERKENNE: ${e.result.text}`);
-            stopSpeech();
+            
+            // Stop speech only if audio is playing and this is the first recognition
+            if (!isRecognizingRef.current && isPlayingAudioRef.current) {
+              stopSpeech();
+            }
             
             // Update or create temporary user message with partial result
             setMessages(prev => {
@@ -548,8 +616,6 @@ Es kann sein, dass Inputs falsch transkribiert werden. Falls du also zusammenhan
       console.error('Speech credentials nicht konfiguriert');
       return;
     }
-
-    stopSpeech(); // Stoppe Sprachausgabe wenn Nutzer spricht
     
     if (recognizer.current) {
       try {
@@ -597,28 +663,40 @@ Es kann sein, dass Inputs falsch transkribiert werden. Falls du also zusammenhan
     };
   }, []);
 
-  const handleSettingsChange = (setting: keyof ModelSettings, value: string | number) => {
+  const handleSettingsChange = useCallback((setting: keyof ModelSettings, value: string | number) => {
     setModelSettings(prev => ({
       ...prev,
       [setting]: value
     }));
-  };
+  }, []);
+
+  const handleSystemPromptChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    handleSettingsChange('systemPrompt', e.target.value);
+  }, [handleSettingsChange]);
+
+  const handleMaxTokensChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    handleSettingsChange('maxTokens', parseInt(e.target.value));
+  }, [handleSettingsChange]);
+
+  const handleTemperatureChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    handleSettingsChange('temperature', parseFloat(e.target.value));
+  }, [handleSettingsChange]);
 
   const reinitializeTTSClient = async () => {
     try {
-      debugLog('Reinitializing TTS client...');
-      const client = await Client.connect("https://stt4sg.fhnw.ch/tts/");
+      ttsClientPromise = Client.connect("https://stt4sg.fhnw.ch/tts/");
+      const client = await ttsClientPromise;
       setTTSClient({
         client: Promise.resolve(client),
         isReady: true
       });
-      debugLog('TTS client reinitialized successfully');
     } catch (error) {
       console.error('Failed to reinitialize TTS client:', error);
-      setTTSClient(prev => ({
-        ...prev,
+      ttsClientPromise = null;
+      setTTSClient({
+        client: null,
         isReady: false
-      }));
+      });
     }
   };
 
@@ -676,7 +754,7 @@ Es kann sein, dass Inputs falsch transkribiert werden. Falls du also zusammenhan
     processDialectChange();
   }, [dialectChangeQueue.current.length]);
 
-  const handleDialectChange = (event: any) => {
+  const handleDialectChange = useCallback((event: any) => {
     const newDialect = event.target.value;
     if (newDialect !== selectedDialect) {
       // Add to queue with current and target dialects
@@ -693,45 +771,74 @@ Es kann sein, dass Inputs falsch transkribiert werden. Falls du also zusammenhan
         setSelectedDialect(prev => prev); // Force re-render to trigger effect
       }
     }
-  };
+  }, [selectedDialect]);
 
   const initializeTTSClient = async () => {
-    if (isTTSClientInitializedOutside) {
-      debugLog('TTS-Client wurde bereits initialisiert.');
+    if (ttsClientPromise) {
+      try {
+        const client = await ttsClientPromise;
+        setTTSClient({
+          client: Promise.resolve(client),
+          isReady: true
+        });
+      } catch (error) {
+        // Error already logged
+      }
       return;
     }
+    
+    ttsClientPromise = Client.connect("https://stt4sg.fhnw.ch/tts/");
+    
     try {
-      isTTSClientInitializedOutside = true;
-      debugLog('Initialisiere TTS-Client...');
-      const client = await Client.connect("https://stt4sg.fhnw.ch/tts/");
+      const client = await ttsClientPromise;
       setTTSClient({
         client: Promise.resolve(client),
         isReady: true
       });
-      debugLog('TTS-Client erfolgreich initialisiert.');
     } catch (error) {
       console.error('Fehler bei der Initialisierung des TTS-Clients:', error);
-      isTTSClientInitializedOutside = false;
-      setTTSClient(prev => ({
-        ...prev,
-        isReady: false,
-        client: null
-      }));
+      ttsClientPromise = null;
+      setTTSClient({
+        client: null,
+        isReady: false
+      });
     }
   };
 
   useEffect(() => {
-    initializeTTSClient();
-  }, []); // Dieser Effekt wird nun nur einmal initialisiert
+    const init = async () => {
+      // If client promise already exists (e.g., from previous mount in StrictMode),
+      // wait for it and set state
+      if (ttsClientPromise) {
+        try {
+          const client = await ttsClientPromise;
+          setTTSClient({
+            client: Promise.resolve(client),
+            isReady: true
+          });
+        } catch (error) {
+          console.error('Error restoring TTS client state:', error);
+        }
+      } else {
+        // Initialize new client
+        await initializeTTSClient();
+      }
+    };
+    
+    init();
+  }, []);
 
   const processNextSentence = async () => {
     if (sentencesToProcess.current.length === 0) return;
 
     const nextSentence = sentencesToProcess.current[0];
-    try {
-      if (!isSpeechEnabled || !ttsClient.isReady || !ttsClient.client) return;
+    
+    if (!isSpeechEnabled || !ttsClientPromise) {
+      return;
+    }
 
-      const client = await ttsClient.client;
+    try {
+      const client = await ttsClientPromise;
       debugLog('Processing sentence:', nextSentence.text, 'sequence:', nextSentence.sequence);
 
       // Übersetzen
@@ -893,7 +1000,7 @@ Es kann sein, dass Inputs falsch transkribiert werden. Falls du also zusammenhan
           <TextField
             label="System Prompt"
             value={modelSettings.systemPrompt}
-            onChange={(e) => handleSettingsChange('systemPrompt', e.target.value)}
+            onChange={handleSystemPromptChange}
             size="small"
             fullWidth
             multiline
@@ -904,7 +1011,7 @@ Es kann sein, dass Inputs falsch transkribiert werden. Falls du also zusammenhan
             label="Max Tokens"
             type="number"
             value={modelSettings.maxTokens}
-            onChange={(e) => handleSettingsChange('maxTokens', parseInt(e.target.value))}
+            onChange={handleMaxTokensChange}
             size="small"
             fullWidth
             InputProps={{
@@ -916,7 +1023,7 @@ Es kann sein, dass Inputs falsch transkribiert werden. Falls du also zusammenhan
             label="Temperature"
             type="number"
             value={modelSettings.temperature}
-            onChange={(e) => handleSettingsChange('temperature', parseFloat(e.target.value))}
+            onChange={handleTemperatureChange}
             size="small"
             fullWidth
             InputProps={{
@@ -933,7 +1040,7 @@ Es kann sein, dass Inputs falsch transkribiert werden. Falls du also zusammenhan
               control={
                 <Switch
                   checked={isListening}
-                  onChange={(e) => e.target.checked ? initializeRecognizer() : stopListening()}
+                  onChange={handleMicrophoneToggle}
                   icon={<Mic />}
                   checkedIcon={<MicOff />}
                 />
@@ -944,7 +1051,7 @@ Es kann sein, dass Inputs falsch transkribiert werden. Falls du also zusammenhan
               control={
                 <Switch
                   checked={isSpeechEnabled}
-                  onChange={(e) => setIsSpeechEnabled(e.target.checked)}
+                  onChange={handleSpeechToggle}
                   icon={<VolumeOff />}
                   checkedIcon={<VolumeUp />}
                 />
@@ -962,10 +1069,7 @@ Es kann sein, dass Inputs falsch transkribiert werden. Falls du also zusammenhan
             </Typography>
             <IconButton
               color="primary"
-              onClick={() => {
-                setMessages([]);
-                initializeChat();
-              }}
+              onClick={handleNewChat}
               title="Neuer Chat starten"
               sx={{ 
                 '&:hover': { 
@@ -983,28 +1087,11 @@ Es kann sein, dass Inputs falsch transkribiert werden. Falls du also zusammenhan
               {messages.map((message, index) => {
                 const isTemporary = isRecognizing && index === messages.length - 1 && message.isUser;
                 return (
-                  <ListItem
+                  <MessageItem
                     key={index}
-                    sx={{
-                      justifyContent: message.isUser ? 'flex-end' : 'flex-start',
-                      mb: 1,
-                    }}
-                  >
-                    <Paper
-                      elevation={1}
-                      sx={{
-                        p: 2,
-                        maxWidth: '70%',
-                        backgroundColor: message.isUser ? 'primary.light' : 'grey.100',
-                        color: message.isUser ? 'white' : 'text.primary',
-                        whiteSpace: 'pre-wrap',
-                        opacity: isTemporary ? 0.7 : 1,
-                        fontStyle: isTemporary ? 'italic' : 'normal',
-                      }}
-                    >
-                      <ListItemText primary={message.text} />
-                    </Paper>
-                  </ListItem>
+                    message={message}
+                    isTemporary={isTemporary}
+                  />
                 );
               })}
             </List>
@@ -1023,13 +1110,8 @@ Es kann sein, dass Inputs falsch transkribiert werden. Falls du also zusammenhan
                 variant="outlined"
                 placeholder="Nachricht eingeben..."
                 value={input}
-                onChange={(e) => setInput(e.target.value)}
-                onKeyPress={(e) => {
-                  if (e.key === 'Enter' && !e.shiftKey) {
-                    e.preventDefault();
-                    handleSend();
-                  }
-                }}
+                onChange={handleInputChange}
+                onKeyPress={handleKeyPress}
               />
               <IconButton
                 color="primary"
