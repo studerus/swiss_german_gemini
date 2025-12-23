@@ -6,10 +6,8 @@ import { createGoogleGenerativeAI } from '@ai-sdk/google';
 import { createOpenAI } from '@ai-sdk/openai';
 import { createGroq } from '@ai-sdk/groq';
 import * as speechsdk from 'microsoft-cognitiveservices-speech-sdk';
-import { Client } from "@gradio/client";
 
-// Modulweite Variable zur Vermeidung der mehrfachen Initialisierung
-let ttsClientPromise: Promise<Client> | null = null;
+
 
 interface ModelSettings {
   systemPrompt: string;
@@ -31,8 +29,8 @@ interface ProviderConfig {
 }
 
 const AVAILABLE_PROVIDERS: ProviderConfig[] = [
-  { 
-    id: 'google', 
+  {
+    id: 'google',
     name: 'Google Gemini',
     models: [
       // Gemini 2.5 Series (Latest - June 2025)
@@ -50,8 +48,8 @@ const AVAILABLE_PROVIDERS: ProviderConfig[] = [
       { id: 'gemini-1.5-pro', name: 'Gemini 1.5 Pro (Legacy)' },
     ]
   },
-  { 
-    id: 'openai', 
+  {
+    id: 'openai',
     name: 'OpenAI',
     models: [
       // --- GPT-5 Series ---
@@ -77,8 +75,8 @@ const AVAILABLE_PROVIDERS: ProviderConfig[] = [
       { id: 'gpt-3.5-turbo', name: 'GPT-3.5 Turbo' },
     ]
   },
-  { 
-    id: 'groq', 
+  {
+    id: 'groq',
     name: 'Groq',
     models: [
       // Production
@@ -111,37 +109,30 @@ const AVAILABLE_DIALECTS = [
   { id: 'Zürich', name: 'Zürichdeutsch' }
 ] as const;
 
-interface TTSClient {
-  client: Promise<Client> | null;
-  isReady: boolean;
-}
+import { FHNWTranslationService } from './services/translation/FHNWTranslationService';
+import { GradioTTSProvider } from './services/tts/GradioTTSProvider';
+import { SlangTTSProvider } from './services/tts/SlangTTSProvider';
+import { TTSProvider, TranslationService } from './services/types';
+
+// ... (existing imports)
+
+const SLANG_VOICE_MAPPING: Record<string, string> = {
+  'Aargau': 'gsw-CHE-zh', // Fallback
+  'Bern': 'gsw-CHE-be',
+  'Basel': 'gsw-CHE-ba',
+  'Graubünden': 'gsw-CHE-gr',
+  'Luzern': 'gsw-CHE-lu',
+  'St. Gallen': 'gsw-CHE-sg',
+  'Valais': 'gsw-CHE-be', // Fallback
+  'Zürich': 'gsw-CHE-zh'
+};
+
+// ... (existing constants)
 
 interface AudioQueueItem {
   text: string;
-  audioData: AudioResponse['data'][0];
+  blobUrl: string; // Changed from audioData object to direct blobUrl
   sequence: number;
-}
-
-interface TranslationResponse {
-  data: string;
-  type: string;
-  time: Date;
-  endpoint: string;
-  fn_index: number;
-}
-
-interface AudioResponse {
-  data: [{
-    url: string;
-    path: string;
-    size: number | null;
-    orig_name: string;
-    mime_type: string | null;
-  }];
-  type: string;
-  time: Date;
-  endpoint: string;
-  fn_index: number;
 }
 
 // Memoized Message Component for better performance
@@ -180,13 +171,14 @@ MessageItem.displayName = 'MessageItem';
 
 function App() {
   const [messages, setMessages] = useState<Array<{ text: string; isUser: boolean }>>([]);
+  const messagesRef = useRef<Array<{ text: string; isUser: boolean }>>([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [selectedProvider, setSelectedProvider] = useState<ProviderId>('groq');
   const [selectedModel, setSelectedModel] = useState<string>('llama-3.3-70b-versatile');
   const [isSpeechEnabled, setIsSpeechEnabled] = useState(true);
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  
+
   // API Keys for different providers
   const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY || '';
   const OPENAI_API_KEY = import.meta.env.VITE_OPENAI_API_KEY || '';
@@ -209,11 +201,17 @@ Es kann sein, dass Inputs falsch transkribiert werden. Falls du also zusammenhan
     maxTokens: 500,
     temperature: 0.7
   });
-  const [_ttsClient, setTTSClient] = useState<TTSClient>({
-    client: null,
-    isReady: false
+  const [ttsProviderName, setTtsProviderName] = useState<'gradio' | 'slang'>('gradio');
+  const ttsProviderNameRef = useRef<'gradio' | 'slang'>('gradio');
+
+  // Services
+  const translationService = useRef<TranslationService>(new FHNWTranslationService());
+  const ttsProviders = useRef<{ gradio: TTSProvider, slang: TTSProvider }>({
+    gradio: new GradioTTSProvider(),
+    slang: new SlangTTSProvider()
   });
   const [selectedDialect, setSelectedDialect] = useState<string>("Basel");
+  const selectedDialectRef = useRef<string>("Basel");
   const audioQueue = useRef<AudioQueueItem[]>([]);
   const isPlayingAudioRef = useRef<boolean>(false);
   const nextSequenceNumberRef = useRef<number>(0);
@@ -232,6 +230,19 @@ Es kann sein, dass Inputs falsch transkribiert werden. Falls du also zusammenhan
   useEffect(() => {
     scrollToBottom();
   }, [messages]);
+
+  // Keep refs in sync with state
+  useEffect(() => {
+    messagesRef.current = messages;
+  }, [messages]);
+
+  useEffect(() => {
+    ttsProviderNameRef.current = ttsProviderName;
+  }, [ttsProviderName]);
+
+  useEffect(() => {
+    selectedDialectRef.current = selectedDialect;
+  }, [selectedDialect]);
 
   // Helper function to get the model instance based on provider
   const getModelInstance = () => {
@@ -260,19 +271,6 @@ Es kann sein, dass Inputs falsch transkribiert werden. Falls du also zusammenhan
 
   const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
-  const createAudioBlobUrl = async (audioUrl: string): Promise<string> => {
-    try {
-      const response = await fetch(audioUrl, {
-        mode: 'cors',
-        credentials: 'include'
-      });
-      const blob = await response.blob();
-      return URL.createObjectURL(blob);
-    } catch (error) {
-      console.error('Error creating blob URL:', error);
-      throw error;
-    }
-  };
 
   const playNextInQueue = async () => {
     if (audioQueue.current.length === 0) {
@@ -293,17 +291,9 @@ Es kann sein, dass Inputs falsch transkribiert werden. Falls du also zusammenhan
         }
 
         console.log('[TTS Debug] Playing item, sequence:', nextItem.sequence, nextItem.text);
-        const audioData = nextItem.audioData;
         let actualPlayableUrl: string | null = null;
-
-        if (audioData?.url) {
-          try {
-            const blobUrl = await createAudioBlobUrl(audioData.url);
-            actualPlayableUrl = blobUrl;
-          } catch (blobError) {
-            debugLog('Falling back to direct URL');
-            actualPlayableUrl = audioData.url;
-          }
+        if (nextItem.blobUrl) {
+          actualPlayableUrl = nextItem.blobUrl;
         }
 
         if (!actualPlayableUrl) {
@@ -323,6 +313,8 @@ Es kann sein, dass Inputs falsch transkribiert werden. Falls du also zusammenhan
         await new Promise<void>((resolve) => {
           audio.onended = () => {
             if (actualPlayableUrl?.startsWith("blob:")) {
+              // Optionally revoke, but maybe keep for replay or handle in separate cleanup
+              // For now, let's revoke to avoid memory leaks
               URL.revokeObjectURL(actualPlayableUrl);
             }
             resolve();
@@ -357,11 +349,11 @@ Es kann sein, dass Inputs falsch transkribiert werden. Falls du also zusammenhan
       audioPlayerRef.current.pause();
       audioPlayerRef.current.currentTime = 0;
     }
-    
+
     // Leere die Queues
     audioQueue.current = [];
     sentencesToProcess.current = [];
-    
+
     // Reset des Playback-Status
     isPlayingAudioRef.current = false;
   };
@@ -382,14 +374,14 @@ Es kann sein, dass Inputs falsch transkribiert werden. Falls du also zusammenhan
 
   const handleSend = async (messageText?: string) => {
     const textToSend = messageText || input.trim();
-    
+
     if (!textToSend) return;
 
     // Check if API key is available for the selected provider
     const apiKey = selectedProvider === 'google' ? GEMINI_API_KEY :
-                   selectedProvider === 'openai' ? OPENAI_API_KEY :
-                   selectedProvider === 'groq' ? GROQ_API_KEY : '';
-    
+      selectedProvider === 'openai' ? OPENAI_API_KEY :
+        selectedProvider === 'groq' ? GROQ_API_KEY : '';
+
     if (!apiKey) {
       console.error(`API key for ${selectedProvider} not configured`);
       return;
@@ -400,7 +392,7 @@ Es kann sein, dass Inputs falsch transkribiert werden. Falls du also zusammenhan
       stopSpeech();
     }
     setInput('');
-    
+
     // Add user message to UI
     setMessages(prevMessages => [...prevMessages, { text: textToSend, isUser: true }]);
     setIsLoading(true);
@@ -408,11 +400,11 @@ Es kann sein, dass Inputs falsch transkribiert werden. Falls du also zusammenhan
     try {
       // Add empty assistant message
       setMessages(prevMessages => [...prevMessages, { text: '', isUser: false }]);
-      
-      // Build messages array for the AI SDK
-      const conversationMessages: Array<{role: 'system' | 'user' | 'assistant', content: string}> = [
+
+      // Build messages array for the AI SDK - use ref to get latest messages
+      const conversationMessages: Array<{ role: 'system' | 'user' | 'assistant', content: string }> = [
         { role: 'system', content: modelSettings.systemPrompt },
-        ...messages.map(msg => ({
+        ...messagesRef.current.map(msg => ({
           role: msg.isUser ? 'user' as const : 'assistant' as const,
           content: msg.text
         })),
@@ -443,9 +435,12 @@ Es kann sein, dass Inputs falsch transkribiert werden. Falls du also zusammenhan
         },
       });
 
+      let firstSentenceSent = false;
+      let firstSentenceContent = '';
+
       for await (const chunk of result.textStream) {
         fullResponse += chunk;
-        
+
         setMessages(prev => {
           const newMessages = [...prev];
           newMessages[newMessages.length - 1] = {
@@ -456,22 +451,59 @@ Es kann sein, dass Inputs falsch transkribiert werden. Falls du also zusammenhan
         });
 
         currentBuffer += chunk;
-        
-        const { sentences, remainder } = extractSentences(currentBuffer);
-        if (sentences.length > 0) {
-          // First sentence received
-          if (firstSentenceReceivedTime === null) {
-            firstSentenceReceivedTime = performance.now();
-            console.log(`[TTS Debug] First sentence received in ${Math.round(firstSentenceReceivedTime - startTimeRef.current)}ms`);
+
+        const currentProvider = ttsProviderNameRef.current;
+
+        // Progressive sentence splitting logic
+        if (currentProvider === 'gradio') {
+          // Gradio (FHNW): Split everything for lowest latency
+          const { sentences, remainder } = extractSentences(currentBuffer);
+          if (sentences.length > 0) {
+            if (firstSentenceReceivedTime === null) {
+              firstSentenceReceivedTime = performance.now();
+              console.log(`[TTS Debug] First sentence received in ${Math.round(firstSentenceReceivedTime - startTimeRef.current)}ms`);
+            }
+            sentences.forEach(s => generateAndQueueTTS(s));
           }
-          sentences.forEach(s => generateAndQueueTTS(s));
+          currentBuffer = remainder;
+        } else if (!firstSentenceSent) {
+          // Slang: Only split the FIRST sentence to start playback quickly
+          const { sentences, remainder } = extractSentences(currentBuffer);
+          if (sentences.length > 0) {
+            firstSentenceContent = sentences[0];
+            generateAndQueueTTS(firstSentenceContent);
+            firstSentenceSent = true;
+            currentBuffer = remainder; // Not strictly needed but keeps it clean
+
+            if (firstSentenceReceivedTime === null) {
+              firstSentenceReceivedTime = performance.now();
+              console.log(`[TTS Debug] First sentence (Slang) received in ${Math.round(firstSentenceReceivedTime - startTimeRef.current)}ms`);
+            }
+          }
         }
-        currentBuffer = remainder;
       }
 
-      if (currentBuffer.trim()) {
-        generateAndQueueTTS(currentBuffer.trim());
-        currentBuffer = '';
+      // Final processing
+      const finalProvider = ttsProviderNameRef.current;
+      if (finalProvider === 'gradio') {
+        if (currentBuffer.trim()) {
+          generateAndQueueTTS(currentBuffer.trim());
+          currentBuffer = '';
+        }
+      } else {
+        // For Slang
+        if (!firstSentenceSent) {
+          // Response was too short to have a sentence boundary, or just one sentence
+          if (fullResponse.trim()) {
+            generateAndQueueTTS(fullResponse.trim());
+          }
+        } else {
+          // Send the rest of the response as one single chunk for better quality
+          const rest = fullResponse.slice(fullResponse.indexOf(firstSentenceContent) + firstSentenceContent.length).trim();
+          if (rest) {
+            generateAndQueueTTS(rest);
+          }
+        }
       }
     } catch (error) {
       console.error('Error:', error);
@@ -499,6 +531,7 @@ Es kann sein, dass Inputs falsch transkribiert werden. Falls du also zusammenhan
 
   const handleNewChat = useCallback(() => {
     setMessages([]);
+    messagesRef.current = [];
   }, []);
 
   const handleMicrophoneToggle = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
@@ -545,7 +578,7 @@ Es kann sein, dass Inputs falsch transkribiert werden. Falls du also zusammenhan
       try {
         const speechConfig = speechsdk.SpeechConfig.fromSubscription(SPEECH_KEY, SPEECH_REGION);
         speechConfig.speechRecognitionLanguage = "de-CH";
-        
+
         const audioConfig = speechsdk.AudioConfig.fromDefaultMicrophoneInput();
         const newRecognizer = new speechsdk.SpeechRecognizer(speechConfig, audioConfig);
 
@@ -553,12 +586,12 @@ Es kann sein, dass Inputs falsch transkribiert werden. Falls du also zusammenhan
         newRecognizer.recognizing = (_, e) => {
           if (e.result.text) {
             console.log(`ERKENNE: ${e.result.text}`);
-            
+
             // Stop speech only if audio is playing and this is the first recognition
             if (!isRecognizingRef.current && isPlayingAudioRef.current) {
               stopSpeech();
             }
-            
+
             // Update or create temporary user message with partial result
             setMessages(prev => {
               const newMessages = [...prev];
@@ -588,7 +621,7 @@ Es kann sein, dass Inputs falsch transkribiert werden. Falls du also zusammenhan
             console.log(`ERKANNT: ${e.result.text}`);
             isRecognizingRef.current = false;
             setIsRecognizing(false);
-            
+
             // Remove temporary message before sending
             setMessages(prev => {
               const newMessages = [...prev];
@@ -598,7 +631,7 @@ Es kann sein, dass Inputs falsch transkribiert werden. Falls du also zusammenhan
               }
               return newMessages;
             });
-            
+
             await handleSend(e.result.text);
           } else {
             // If recognition failed or was cancelled, remove temporary message
@@ -619,7 +652,7 @@ Es kann sein, dass Inputs falsch transkribiert werden. Falls du also zusammenhan
           setIsListening(false);
           isRecognizingRef.current = false;
           setIsRecognizing(false);
-          
+
           // Remove temporary message if present
           setMessages(prev => {
             const newMessages = [...prev];
@@ -651,7 +684,7 @@ Es kann sein, dass Inputs falsch transkribiert werden. Falls du also zusammenhan
           () => {
             setIsListening(false);
             console.log("Spracherkennung gestoppt");
-            
+
             // Remove temporary message if present
             if (isRecognizingRef.current) {
               isRecognizingRef.current = false;
@@ -668,7 +701,7 @@ Es kann sein, dass Inputs falsch transkribiert werden. Falls du also zusammenhan
           (error) => {
             console.error("Fehler beim Stoppen der Spracherkennung:", error);
             setIsListening(false);
-            
+
             // Remove temporary message if present
             if (isRecognizingRef.current) {
               isRecognizingRef.current = false;
@@ -695,7 +728,7 @@ Es kann sein, dass Inputs falsch transkribiert werden. Falls du also zusammenhan
       console.error('Speech credentials nicht konfiguriert');
       return;
     }
-    
+
     if (recognizer.current) {
       try {
         recognizer.current.startContinuousRecognitionAsync(
@@ -761,23 +794,6 @@ Es kann sein, dass Inputs falsch transkribiert werden. Falls du also zusammenhan
     handleSettingsChange('temperature', parseFloat(e.target.value));
   }, [handleSettingsChange]);
 
-  const reinitializeTTSClient = async () => {
-    try {
-      ttsClientPromise = Client.connect("https://stt4sg.fhnw.ch/tts/");
-      const client = await ttsClientPromise;
-      setTTSClient({
-        client: Promise.resolve(client),
-        isReady: true
-      });
-    } catch (error) {
-      console.error('Failed to reinitialize TTS client:', error);
-      ttsClientPromise = null;
-      setTTSClient({
-        client: null,
-        isReady: false
-      });
-    }
-  };
 
   const dialectChangeQueue = useRef<Array<{ target: string, current: string }>>([]);
   const isProcessingDialectChange = useRef(false);
@@ -786,14 +802,14 @@ Es kann sein, dass Inputs falsch transkribiert werden. Falls du also zusammenhan
   useEffect(() => {
     const processDialectChange = async () => {
       if (dialectChangeQueue.current.length === 0 || isProcessingDialectChange.current) return;
-      
+
       isProcessingDialectChange.current = true;
       const { target: newDialect, current: prevDialect } = dialectChangeQueue.current[0];
-      
+
       try {
         // Stop any ongoing speech
         stopSpeech();
-        
+
         // Clean up existing recognizer
         if (recognizer.current) {
           await new Promise<void>((resolve) => {
@@ -807,13 +823,13 @@ Es kann sein, dass Inputs falsch transkribiert werden. Falls du also zusammenhan
 
         // Update the dialect state
         setSelectedDialect(newDialect);
-        
-        // Reinitialize TTS client with new dialect
-        await reinitializeTTSClient();
-        
+
+        // Services handle their own state, so no explicit re-init needed for dialect change alone
+        // except keeping track of it for next request.
+
         // Initialize new recognizer with updated settings
         await initializeRecognizer();
-        
+
       } catch (error) {
         console.error('Error during dialect change:', error);
         // Revert to previous dialect if change failed
@@ -822,7 +838,7 @@ Es kann sein, dass Inputs falsch transkribiert werden. Falls du also zusammenhan
         // Remove processed dialect from queue
         dialectChangeQueue.current.shift();
         isProcessingDialectChange.current = false;
-        
+
         // Process next in queue if available
         if (dialectChangeQueue.current.length > 0) {
           processDialectChange();
@@ -841,10 +857,10 @@ Es kann sein, dass Inputs falsch transkribiert werden. Falls du also zusammenhan
         target: newDialect,
         current: selectedDialect
       });
-      
+
       // Update UI immediately while processing in background
       setSelectedDialect(newDialect);
-      
+
       // Trigger effect if not already processing
       if (!isProcessingDialectChange.current) {
         setSelectedDialect(prev => prev); // Force re-render to trigger effect
@@ -852,58 +868,13 @@ Es kann sein, dass Inputs falsch transkribiert werden. Falls du also zusammenhan
     }
   }, [selectedDialect]);
 
-  const initializeTTSClient = async () => {
-    if (ttsClientPromise) {
-      try {
-        const client = await ttsClientPromise;
-        setTTSClient({
-          client: Promise.resolve(client),
-          isReady: true
-        });
-      } catch (error) {
-        // Error already logged
-      }
-      return;
-    }
-    
-    ttsClientPromise = Client.connect("https://stt4sg.fhnw.ch/tts/");
-    
-    try {
-      const client = await ttsClientPromise;
-      setTTSClient({
-        client: Promise.resolve(client),
-        isReady: true
-      });
-    } catch (error) {
-      console.error('Fehler bei der Initialisierung des TTS-Clients:', error);
-      ttsClientPromise = null;
-      setTTSClient({
-        client: null,
-        isReady: false
-      });
-    }
-  };
-
+  // Effect to initialize services
   useEffect(() => {
     const init = async () => {
-      // If client promise already exists (e.g., from previous mount in StrictMode),
-      // wait for it and set state
-      if (ttsClientPromise) {
-        try {
-          const client = await ttsClientPromise;
-          setTTSClient({
-            client: Promise.resolve(client),
-            isReady: true
-          });
-        } catch (error) {
-          console.error('Error restoring TTS client state:', error);
-        }
-      } else {
-        // Initialize new client
-        await initializeTTSClient();
-      }
+      await translationService.current.initialize().catch(e => console.error("Translation init failed", e));
+      await ttsProviders.current.gradio.initialize().catch(e => console.error("Gradio init failed", e));
+      await ttsProviders.current.slang.initialize().catch(e => console.error("Slang init failed", e));
     };
-    
     init();
   }, []);
 
@@ -911,38 +882,53 @@ Es kann sein, dass Inputs falsch transkribiert werden. Falls du also zusammenhan
     if (sentencesToProcess.current.length === 0) return;
 
     const nextSentence = sentencesToProcess.current[0];
-    
-    if (!isSpeechEnabled || !ttsClientPromise) {
+
+    if (!isSpeechEnabled) {
+      sentencesToProcess.current.shift();
+      if (sentencesToProcess.current.length > 0) processNextSentence();
       return;
     }
 
     try {
-      const client = await ttsClientPromise;
       debugLog('Processing sentence:', nextSentence.text, 'sequence:', nextSentence.sequence);
 
-      // Übersetzen
-      const translationResult = (await client.predict("/translate_interface", {
-        text_de: cleanTextForSpeech(nextSentence.text),
-        dialect: selectedDialect,
-      })) as unknown as TranslationResponse;
+      let textToSpeak = cleanTextForSpeech(nextSentence.text);
+      const currentProviderName = ttsProviderNameRef.current;
+      const currentDialect = selectedDialectRef.current;
 
-      const swissGermanText = translationResult.data;
-      debugLog('Swiss German:', swissGermanText);
-
-      // Audio generieren
-      const audioResponse = (await client.predict("/speech_interface", {
-        edited_text: swissGermanText,
-        dialect: selectedDialect,
-      })) as AudioResponse;
-
-      if (!audioResponse?.data?.[0]) {
-        throw new Error("No audio data from TTS");
+      // 1. Translation Step (Optional - only for Gradio)
+      if (currentProviderName === 'gradio') {
+        try {
+          let swissGermanText = await translationService.current.translate(textToSpeak, currentDialect);
+          // Handle case where translation returns an array
+          if (Array.isArray(swissGermanText)) {
+            swissGermanText = swissGermanText[0] || textToSpeak;
+          }
+          debugLog('Swiss German:', swissGermanText);
+          textToSpeak = swissGermanText;
+        } catch (error) {
+          console.error("Translation failed, falling back to original text", error);
+        }
       }
+
+      // 2. TTS Step
+      const currentProvider = ttsProviders.current[currentProviderName];
+
+      // Determine voice/dialect ID based on provider
+      let voiceId = currentDialect;
+      if (currentProviderName === 'slang') {
+        voiceId = SLANG_VOICE_MAPPING[currentDialect] || 'gsw-CHE-gr'; // Default fallback
+      }
+
+      const audioUrl = await currentProvider.synthesize({
+        text: textToSpeak,
+        voiceOrLang: voiceId,
+      });
 
       // In die Queue für die Wiedergabe einfügen
       audioQueue.current.push({
-        text: swissGermanText,
-        audioData: audioResponse.data[0],
+        text: textToSpeak,
+        blobUrl: audioUrl,
         sequence: nextSentence.sequence
       });
 
@@ -965,7 +951,7 @@ Es kann sein, dass Inputs falsch transkribiert werden. Falls du also zusammenhan
 
   const generateAndQueueTTS = async (sentence: string) => {
     const sequence = nextSequenceNumberRef.current++;
-    
+
     // Füge den Satz zur Verarbeitungswarteschlange hinzu
     sentencesToProcess.current.push({
       text: sentence,
@@ -981,18 +967,18 @@ Es kann sein, dass Inputs falsch transkribiert werden. Falls du also zusammenhan
   const extractSentences = (text: string): { sentences: string[]; remainder: string } => {
     // Ersetze Punkte in Abkürzungen mit einem Platzhalter
     const placeholder = '___DOT___';
-    const protectedText = text.replace(/\b([Ss]t|[Dd]r|[Pp]rof|[Mm]r|[Mm]rs|[Mm]s|etc|z\.B|d\.h|u\.a|bzw)\./g, (match) => 
+    const protectedText = text.replace(/\b([Ss]t|[Dd]r|[Pp]rof|[Mm]r|[Mm]rs|[Mm]s|etc|z\.B|d\.h|u\.a|bzw)\./g, (match) =>
       match.replace('.', placeholder)
     );
 
     // Sätze an Satzzeichen trennen
     const sentenceRegex = /[^.!?]*[.!?]/g;
     const matches = protectedText.match(sentenceRegex) || [];
-    
+
     // Satzenden wiederherstellen
-    const sentences = matches.map(s => 
+    const sentences = matches.map(s =>
       s.replace(new RegExp(placeholder, 'g'), '.')  // Ersetze Platzhalter zurück mit Punkt
-       .trim()
+        .trim()
     );
 
     // Finde den Rest des Textes
@@ -1031,7 +1017,7 @@ Es kann sein, dass Inputs falsch transkribiert werden. Falls du also zusammenhan
           <Typography variant="h6">
             Einstellungen
           </Typography>
-          
+
           <FormControl fullWidth>
             <InputLabel id="provider-select-label">Provider</InputLabel>
             <Select
@@ -1097,7 +1083,7 @@ Es kann sein, dass Inputs falsch transkribiert werden. Falls du also zusammenhan
             multiline
             rows={8}
           />
-          
+
           <TextField
             label="Max Tokens"
             type="number"
@@ -1109,7 +1095,7 @@ Es kann sein, dass Inputs falsch transkribiert werden. Falls du also zusammenhan
               inputProps: { min: 1, max: 2048 }
             }}
           />
-          
+
           <TextField
             label="Temperature"
             type="number"
@@ -1118,13 +1104,26 @@ Es kann sein, dass Inputs falsch transkribiert werden. Falls du also zusammenhan
             size="small"
             fullWidth
             InputProps={{
-              inputProps: { 
-                min: 0, 
-                max: 1, 
-                step: 0.1 
+              inputProps: {
+                min: 0,
+                max: 1,
+                step: 0.1
               }
             }}
           />
+
+          <FormControl fullWidth size="small">
+            <InputLabel id="tts-provider-label">TTS Engine</InputLabel>
+            <Select
+              labelId="tts-provider-label"
+              value={ttsProviderName}
+              label="TTS Engine"
+              onChange={(e) => setTtsProviderName(e.target.value as 'gradio' | 'slang')}
+            >
+              <MenuItem value="gradio">FHNW (Gradio)</MenuItem>
+              <MenuItem value="slang">SlowSoft (Slang)</MenuItem>
+            </Select>
+          </FormControl>
 
           <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
             <FormControlLabel
@@ -1162,17 +1161,17 @@ Es kann sein, dass Inputs falsch transkribiert werden. Falls du also zusammenhan
               color="primary"
               onClick={handleNewChat}
               title="Neuer Chat starten"
-              sx={{ 
-                '&:hover': { 
+              sx={{
+                '&:hover': {
                   backgroundColor: 'primary.light',
                   color: 'white'
-                } 
+                }
               }}
             >
               <AddCircleOutline fontSize="large" />
             </IconButton>
           </Box>
-          
+
           <Box sx={{ flexGrow: 1, overflow: 'auto', p: 2 }}>
             <List>
               {messages.map((message, index) => {
@@ -1214,8 +1213,8 @@ Es kann sein, dass Inputs falsch transkribiert werden. Falls du also zusammenhan
             </Box>
           </Box>
         </Paper>
-      </Box>
-    </Container>
+      </Box >
+    </Container >
   );
 }
 

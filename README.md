@@ -18,7 +18,7 @@ A React-based chat application with multi-provider AI support (Google Gemini, Op
   - Walliserdeutsch
   - Zürichdeutsch
 - Seamless voice conversations in your local dialect
-- Powered by [STT4SG](https://stt4sg.fhnw.ch/) - specialized Swiss German TTS from FHNW
+- Powered by **multiple specialized Swiss German TTS engines**
 
 ### AI Provider Support
 - **Multiple AI Providers**: Switch between Google Gemini, OpenAI, and Groq
@@ -28,6 +28,7 @@ A React-based chat application with multi-provider AI support (Google Gemini, Op
   - **Google Gemini**: Gemini 2.5 Pro, 2.5 Flash, 2.0 Flash, 1.5 Pro/Flash and more
   - **OpenAI**: GPT-5, GPT-4o, GPT-4.1, o3/o4 reasoning models, and more
 - Real-time streaming responses with the Vercel AI SDK
+- **Configurable TTS Engine**: Choose between FHNW (Gradio) and SlowSoft (Slang)
 
 ### User Interface
 - Modern and responsive UI with Material-UI
@@ -44,7 +45,9 @@ A React-based chat application with multi-provider AI support (Google Gemini, Op
   - OpenAI (via `@ai-sdk/openai`)
   - Groq (via `@ai-sdk/groq`)
 - **Speech-to-Text**: Microsoft Azure Speech Services
-- **Text-to-Speech**: [STT4SG](https://stt4sg.fhnw.ch/) - Swiss German speech synthesis by FHNW
+- **Text-to-Speech**: 
+  - [STT4SG](https://stt4sg.fhnw.ch/) (FHNW) - Progressive sentence splitting for low latency
+  - [Slang](https://www.slowsoft.ch/) (SlowSoft) - High-quality synthesis with hybrid splitting
 - **Build Tool**: Vite
 
 ## ⚡ Response Latency Optimizations
@@ -84,6 +87,12 @@ The Swiss German audio generation is optimized with a sophisticated pipeline:
 - Time to first sentence text: ~300ms (Groq)
 - Time for TTS generation: ~500-1000ms (depends on sentence length)
 - **Total time to first audio: ~800-1300ms**
+
+### 5. Smart TTS Engine Optimization
+The app supports two TTS engines with optimized strategies:
+
+- **FHNW (Gradio)**: Uses **Progressive Sentence Splitting**. Each sentence is processed individually as soon as it's generated, ensuring the lowest possible latency for the entire stream.
+- **SlowSoft (Slang)**: Uses **Hybrid Splitting**. The **first sentence** is processed immediately for a fast start. The **rest of the response** is collected and processed as a single chunk, significantly improving prosody and audio naturalness while maintaining a snappy initial response.
 
 
 ## Prerequisites
@@ -128,6 +137,7 @@ npm run dev
    - **Select AI Provider**: Choose between Google Gemini, OpenAI, or Groq
    - **Select Model**: Pick from available models for the chosen provider
    - **Select Swiss German Dialect**: Choose your preferred dialect
+   - **Select TTS Engine**: Toggle between FHNW (Gradio) and SlowSoft (Slang)
    - **Adjust Model Settings**: Configure temperature, max tokens, and system prompt
 3. Interact with the AI:
    - **Text Input** (works without Azure): Type messages in the input field
@@ -149,6 +159,7 @@ No Azure account needed for this basic setup!
 - **Google Gemini**: Advanced AI models with multi-modal capabilities
 - **OpenAI**: GPT-5 and GPT-4 series, including reasoning models
 - **STT4SG**: Specialized Swiss German speech synthesis by FHNW
+- **SlowSoft Slang**: Commercial-grade Swiss German TTS engine
 - **Microsoft Azure Speech Services**: High-quality Speech-to-Text
 
 
