@@ -33,12 +33,12 @@ const AVAILABLE_PROVIDERS: ProviderConfig[] = [
     id: 'google',
     name: 'Google Gemini',
     models: [
-      // Gemini 2.5 Series (Latest - June 2025)
+      // Gemini 3 Series (New)
+      { id: 'gemini-3-pro-preview', name: 'Gemini 3 Pro Preview' },
+      { id: 'gemini-3-flash', name: 'Gemini 3 Flash' },
+      // Gemini 2.5 Series
       { id: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro' },
-      { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash (recommended)' },
-      { id: 'gemini-2.5-flash-preview-09-2025', name: 'Gemini 2.5 Flash Preview' },
-      { id: 'gemini-2.5-flash-lite', name: 'Gemini 2.5 Flash-Lite' },
-      { id: 'gemini-2.5-flash-lite-preview-09-2025', name: 'Gemini 2.5 Flash-Lite Preview' },
+      { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash' },
       // Gemini 2.0 Series
       { id: 'gemini-2.0-flash', name: 'Gemini 2.0 Flash' },
       { id: 'gemini-2.0-flash-exp', name: 'Gemini 2.0 Flash Experimental' },
@@ -53,10 +53,10 @@ const AVAILABLE_PROVIDERS: ProviderConfig[] = [
     name: 'OpenAI',
     models: [
       // --- GPT-5 Series ---
+      { id: 'gpt-5.2', name: 'GPT-5.2 (Latest)' },
+      { id: 'gpt-5.2-chat', name: 'GPT-5.2 Chat' },
+      { id: 'gpt-5.1-instant', name: 'GPT-5.1 Instant' },
       { id: 'gpt-5', name: 'GPT-5' },
-      { id: 'gpt-5-pro', name: 'GPT-5 Pro' },
-      { id: 'gpt-5-mini', name: 'GPT-5 Mini' },
-      { id: 'gpt-5-nano', name: 'GPT-5 Nano' },
       // --- GPT-4 Series ---
       { id: 'gpt-4o', name: 'GPT-4o' },
       { id: 'gpt-4o-mini', name: 'GPT-4o Mini' },

@@ -25,8 +25,8 @@ A React-based chat application with multi-provider AI support (Google Gemini, Op
 - **Groq as Default**: Ultra-low latency inference (set as default provider)
 - **Extensive Model Selection**:
   - **Groq**: Llama 3.3 70B, GPT-OSS 120B, Mixtral, Qwen, and more (⚡ fastest)
-  - **Google Gemini**: Gemini 2.5 Pro, 2.5 Flash, 2.0 Flash, 1.5 Pro/Flash and more
-  - **OpenAI**: GPT-5, GPT-4o, GPT-4.1, o3/o4 reasoning models, and more
+  - **Google Gemini**: Gemini 3 Pro Preview, Gemini 3 Flash, Gemini 2.5 Pro and more
+  - **OpenAI**: GPT-5.2, GPT-5.1 Instant, GPT-5, o3/o4 reasoning models
 - Real-time streaming responses with the Vercel AI SDK
 - **Configurable TTS Engine**: Choose between FHNW (Gradio) and SlowSoft (Slang)
 
